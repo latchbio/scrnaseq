@@ -1,0 +1,6 @@
+install.packages('BiocManager')
+BiocManager::install('eisaR')
+BiocManager::install('Biostrings')
+BiocManager::install('BSgenome')
+BiocManager::install('GenomicFeatures')
+BiocManager::install('stringr')
