@@ -4,12 +4,18 @@ ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
 
 RUN apt-get update && apt-get install --yes \
+  make \
+  pandoc \
   libcurl4-openssl-dev \
   libxml2-dev \
   libssl-dev \
   curl \
   software-properties-common \
-  dirmngr
+  dirmngr \
+  r-base
+
+RUN R -e "install.packages('BiocManager')"
+RUN R -e "BiocManager::install('alevinQC')"
 
 RUN curl -O \
   https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
@@ -28,7 +34,7 @@ RUN conda install -c defaults \
 # correctly with latch.
 RUN python3 -m pip install --upgrade latch lgenome requests
 COPY wf /root/wf
+COPY scripts/qc.R /root/qc.R
 ARG tag
 ENV FLYTE_INTERNAL_IMAGE $tag
 WORKDIR /root
-CMD ["/bin/sleep", "1000"]

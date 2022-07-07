@@ -144,6 +144,10 @@ class H5ADGenerationError(Exception):
     pass
 
 
+class ReportGenerationError(Exception):
+    pass
+
+
 @small_task
 def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) -> str:
     print("Generating output location...")
@@ -371,7 +375,7 @@ def map_reads(
         sample_args += r2
 
     message(
-        "info", {"title": f"Mapping {nrof_samples} Reads To Transcripts", "body": ""}
+        "info", {"title": f"Mapping {nrof_samples} Samples To Transcripts", "body": ""}
     )
     print("Mapping reads to transcripts...")
 
@@ -381,6 +385,7 @@ def map_reads(
         "alevin",
         "-p",
         "96",
+        "--dumpUmiGraph",
         "-i",
         str(Path(splici_index)),
         "-l",
@@ -429,7 +434,7 @@ def quantify_reads(
     map_dir: LatchDir,
     tg_map: LatchFile,
     output_name: str,
-) -> LatchDir:
+) -> Tuple[LatchDir, LatchDir]:
     message("info", {"title": f"Generating Whitelist", "body": ""})
     print("Generating permit list...")
     permit_list_cmd = [
@@ -533,6 +538,7 @@ def quantify_reads(
         "--resolution",
         "cr-like",
         "--use-mtx",
+        "--summary-stat"
     ]
 
     quant_process = subprocess.Popen(
@@ -557,11 +563,11 @@ def quantify_reads(
         message(
             "error", {"title": "AlevinFry Quant", "body": f"View logs to see error"}
         )
-        raise Exception(f"\tAlevin-fry quant failed with exit code {retval}")
+        raise AlevinFryQuantError(f"\tAlevin-fry quant failed with exit code {retval}")
 
     message("info", {"title": "Success", "body": ""})
     print("Quantification complete. Packaging Files...")
-    return LatchDir("/root/quant_res", f"{output_name}raw_counts")
+    return LatchDir("/root/quant", f"{output_name}quant_preprocessing"), LatchDir("/root/quant_res", f"{output_name}raw_counts")
 
 
 @small_task
@@ -627,6 +633,7 @@ def h5ad(
     if failed_count == 3:
         raise H5ADGenerationError(f"\tFailed to generate all H5AD files")
 
+    message("info", {"title": f"Success", "body": ""})
     return (
         counts_out,
         velocity_out,
@@ -634,10 +641,52 @@ def h5ad(
     )
 
 
-# @small_task
-# def generate_report(
-#
-# ) -> LatchFile:
+@small_task
+def generate_report(
+    map_dir: LatchDir,
+    permit_dir: LatchDir,
+    quant_dir: LatchDir,
+    name: str,
+    output_name: str,
+) -> LatchFile:
+    message("info", {"title": f"Generating QC Report", "body": ""})
+    print("Generating QC Report...")
+    report_cmd = [
+        "Rscript",
+        "qc.R",
+        str(Path(map_dir)),
+        str(Path(permit_dir)),
+        str(Path(quant_dir)),
+        name,
+    ]
+
+    report_process = subprocess.Popen(
+        " ".join(report_cmd),
+        shell=True,
+        errors="replace",
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    while True:
+        realtime_output = report_process.stdout.readline()
+
+        if realtime_output == "" and report_process.poll() is not None:
+            break
+        if realtime_output:
+            print("\t" + realtime_output.strip())
+
+    retval = report_process.poll()
+    if retval != 0:
+        message(
+            "error", {"title": "Alevin-Fry QC Report", "body": f"View logs to see error"}
+        )
+        raise ReportGenerationError(f"\tAlevin-Fry QC Report failed with exit code {retval}")
+    
+    message("info", {"title": "Success", "body": ""})
+    print("QC Report complete. Packaging Files...")
+    return LatchFile("/root/alevinQC.html", f"{output_name}alevinQC.html")
 
 
 @workflow
@@ -652,7 +701,7 @@ def scrnaseq(
     custom_ref_genome: Optional[LatchFile] = None,
     splici_index: Optional[LatchDir] = None,
     custom_output_dir: Optional[LatchDir] = None,
-) -> Tuple[LatchDir, LatchFile, LatchFile, LatchFile]:
+) -> Tuple[LatchDir, LatchDir, Optional[LatchFile], Optional[LatchFile], Optional[LatchFile], LatchFile]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
     Single Cell RNA-Seq (Alignment & Quantification)
@@ -880,7 +929,7 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    quantified_reads = quantify_reads(
+    (preprocessed_quant_dir, quantified_reads) = quantify_reads(
         map_dir=mapped_reads,
         tg_map=t2g,
         output_name=output_name,
@@ -891,7 +940,15 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    return quantified_reads, simple, velocity, full
+    report = generate_report(
+        map_dir = mapped_reads,
+        permit_dir = preprocessed_quant_dir,
+        quant_dir = quantified_reads,
+        name = run_name,
+        output_name = output_name,
+    )
+
+    return preprocessed_quant_dir, quantified_reads, simple, velocity, full, report
 
 
 if __name__ == "wf":
