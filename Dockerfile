@@ -21,7 +21,7 @@ RUN conda install -c defaults \
   -c conda-forge \
   -c bioconda \
   -y -n base --debug \
-  salmon alevin-fry multiqc fastqc pyroe bedtools
+  salmon alevin-fry multiqc fastqc pyroe bedtools requests
 
 # STOP HERE:
 # The following lines are needed to ensure your build environement works

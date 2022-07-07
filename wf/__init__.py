@@ -12,8 +12,9 @@ from typing import List, Optional, Tuple, Union
 import lgenome
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
-from latch import large_task, workflow, small_task
+from latch import large_task, small_task, workflow
 from latch.types import LatchDir, LatchFile
+from pyroe import load_fry
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -116,10 +117,7 @@ class MalformedSpliciIndex(Exception):
 
 
 @small_task
-def get_output_location(
-    custom_output_dir: Optional[LatchDir],
-    run_name: str
-) -> str:
+def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) -> str:
     run_name = run_name.rstrip("/").lstrip("/")
     if custom_output_dir is None:
         output_base = f"latch:///SCRNA-Seq Outputs/{run_name}/"
@@ -130,6 +128,7 @@ def get_output_location(
         output_base = f"{remote_path}{run_name}/"
 
     return output_base
+
 
 @large_task
 def make_splici_index(
@@ -265,9 +264,7 @@ def make_splici_index(
         raise Exception(f"\tSalmon index failed with exit code {retval}")
 
     print("Splici index generated. Packaging Files...")
-    return LatchDir(
-        "/root/splici_index", f"{output_name}splici_index"
-    ), LatchFile(
+    return LatchDir("/root/splici_index", f"{output_name}splici_index"), LatchFile(
         f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
         f"{output_name}splici_index/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
     )
@@ -462,6 +459,28 @@ def quantify_reads(
     return LatchDir("/root/quant_res", f"{output_name}counts")
 
 
+@small_task
+def h5ad(
+    quant_dir: LatchDir, output_name: str
+) -> Tuple[LatchFile, LatchFile, LatchFile]:
+    print("Generating h5ad file...")
+    h5ad_output_standard = load_fry(frydir=str(Path(quant_dir)), output_format="scRNA")
+    h5ad_output_include_unspliced = load_fry(
+        frydir=str(Path(quant_dir)), output_format="velocity"
+    )
+    h5ad_output_all_layers = load_fry(frydir=str(Path(quant_dir)), output_format="raw")
+
+    h5ad_output_standard.write("counts.h5ad")
+    h5ad_output_include_unspliced.write("counts_velocity.h5ad")
+    h5ad_output_all_layers.write("counts_USA.h5ad")
+
+    return (
+        LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad"),
+        LatchFile("/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"),
+        LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad"),
+    )
+
+
 @workflow
 def scrnaseq(
     samples: List[Sample],
@@ -474,7 +493,7 @@ def scrnaseq(
     custom_ref_genome: Optional[LatchFile] = None,
     splici_index: Optional[LatchDir] = None,
     custom_output_dir: Optional[LatchDir] = None,
-) -> LatchDir:
+) -> Tuple[LatchDir, LatchFile, LatchFile, LatchFile]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
     Single Cell RNA-Seq (Alignment & Quantification)
@@ -572,7 +591,7 @@ def scrnaseq(
                     flow:
                     - text:
                         Output will be at default location in the data
-                        viewer - RNA-Seq Outputs/"Run Name"
+                        viewer - SCRNA-Seq Outputs/"Run Name"
                 custom:
                     display_name: Specify Custom Path
                     _tmp_unwrap_optionals:
@@ -709,7 +728,12 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    return quantified_reads
+    (simple, velocity, full) = h5ad(
+        quant_dir=quantified_reads,
+        output_name=output_name,
+    )
+
+    return quantified_reads, simple, velocity, full
 
 
 if __name__ == "wf":
