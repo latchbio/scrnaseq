@@ -1,35 +1,26 @@
-"""latch/rnaseq"""
+"""latch/scrnaseq"""
 
-from cgitb import small
-import os
+import gzip
 import subprocess
+import sys
 import types
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
-from urllib.parse import urlparse
-import gzip
-
 
 import lgenome
 from dataclasses_json import dataclass_json
-from flytekit import LaunchPlan, task
-from flytekitplugins.pod import Pod
-from kubernetes.client.models import (
-    V1Container,
-    V1PodSpec,
-    V1ResourceRequirements,
-    V1Toleration,
-)
-from latch import small_task, medium_task, large_task, workflow, create_conditional_section
+from flytekit import LaunchPlan
+from latch import large_task, workflow, small_task
 from latch.types import LatchDir, LatchFile
-import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
+
 def run(cmd: List[str]):
     subprocess.run(cmd, check=True)
+
 
 # TODO - patch latch with proper def __repr__ -> str
 def ___repr__(self):
@@ -68,6 +59,7 @@ class Sample:
     strandedness: Strandedness
     replicates: List[Union[SingleEndReads, PairedEndReads]]
 
+
 class Technology(Enum):
     dropseq = "Drop-seq"
     chromiumv3 = "Chromium v3"
@@ -80,6 +72,7 @@ class Technology(Enum):
     splitseqV2 = "SplitSeq v2"
     quartzseq2 = "QuartzSeq2"
     sciseq3 = "SciSeq3"
+
 
 technology_to_flag = {
     Technology.dropseq: "--dropseq",
@@ -114,11 +107,6 @@ class CustomGenome:
     STAR_index: Optional[LatchFile]
 
 
-@dataclass_json
-@dataclass
-class GenomeData:
-    gtf: LatchFile
-
 class InsufficientCustomGenomeResources(Exception):
     pass
 
@@ -126,12 +114,30 @@ class InsufficientCustomGenomeResources(Exception):
 class MalformedSpliciIndex(Exception):
     pass
 
+
+@small_task
+def get_output_location(
+    custom_output_dir: Optional[LatchDir],
+    run_name: str
+) -> str:
+    run_name = run_name.rstrip("/").lstrip("/")
+    if custom_output_dir is None:
+        output_base = f"latch:///SCRNA-Seq Outputs/{run_name}/"
+    else:
+        remote_path: str = custom_output_dir.remote_path
+        if remote_path[-1] != "/":
+            remote_path += "/"
+        output_base = f"{remote_path}{run_name}/"
+
+    return output_base
+
 @large_task
 def make_splici_index(
     samples: List[Sample],
     read_length: Optional[int],
     splici_index: Optional[LatchDir],
     latch_genome: LatchGenome,
+    output_name: str,
     custom_gtf: Optional[LatchFile] = None,
     custom_ref_genome: Optional[LatchFile] = None,
 ) -> Tuple[LatchDir, LatchFile]:
@@ -141,19 +147,30 @@ def make_splici_index(
         for file in Path(splici_index).iterdir():
             if file.name.endswith("_t2g_3col.tsv"):
                 return splici_index, file
-        raise MalformedSpliciIndex("Could not find ...t2g_3col.tsv in provided splici index")
+        raise MalformedSpliciIndex(
+            "Could not find ...t2g_3col.tsv in provided splici index"
+        )
 
     if read_length is None:
         print("No read length provided.\n\tEstimating read length...")
         reads_file = Path(samples[0].replicates[0].r2)
         lens = []
-        with gzip.open(reads_file, "r") as f:
-            for i, l in enumerate(f):
-                if i > 400:
-                    break
-                if i % 4 != 1:
-                    continue
-                lens.append(len(l))
+        if reads_file.suffix == ".gz":
+            with gzip.open(reads_file, "r") as f:
+                for i, l in enumerate(f):
+                    if i > 400:
+                        break
+                    if i % 4 != 1:
+                        continue
+                    lens.append(len(l))
+        else:
+            with open(reads_file, "r") as f:
+                for i, l in enumerate(f):
+                    if i > 400:
+                        break
+                    if i % 4 != 1:
+                        continue
+                    lens.append(len(l))
 
         read_length = int(sum(lens) / len(lens))
 
@@ -169,7 +186,7 @@ def make_splici_index(
         gm = lgenome.GenomeManager(latch_genome.name)
         genome_path = gm.download_ref_genome()
         gtf_path = gm.download_gtf()
-    
+
     print("Generating splici transcriptome...")
 
     flank_trim_length = 5
@@ -187,7 +204,7 @@ def make_splici_index(
         f"{flank_trim_length}",
         "--filename-prefix",
         "splici_txome",
-        "--dedup-seqs"
+        "--dedup-seqs",
     ]
 
     txome_process = subprocess.Popen(
@@ -210,7 +227,7 @@ def make_splici_index(
     retval = txome_process.poll()
     if retval != 0:
         raise Exception(f"\tPyroe failed with exit code {retval}")
-    
+
     print("Splici transcriptome generated.")
 
     print("Generating splici index...")
@@ -223,7 +240,7 @@ def make_splici_index(
         "-i",
         "splici_index",
         "-p",
-        "96"
+        "96",
     ]
 
     index_process = subprocess.Popen(
@@ -247,24 +264,28 @@ def make_splici_index(
     if retval != 0:
         raise Exception(f"\tSalmon index failed with exit code {retval}")
 
-    print("Splici index generated.")
+    print("Splici index generated. Packaging Files...")
+    return LatchDir(
+        "/root/splici_index", f"{output_name}splici_index"
+    ), LatchFile(
+        f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
+        f"{output_name}splici_index/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
+    )
 
-    return LatchDir("/root/splici_index", "latch:///A_test_rnaseq/splici_index"), LatchFile(f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv", f"latch:///A_test_rnaseq/splici_index/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv")
 
 @large_task
 def map_reads(
     splici_index: LatchDir,
     samples: List[Sample],
     technology: Technology,
+    output_name: str,
 ) -> LatchDir:
     sample_args = []
     if type(samples[0].replicates[0]) is SingleEndReads:
         sample_args.append("-r")
         for sample in samples:
             for replicate in sample.replicates:
-                sample_args.append(
-                    f"{Path(replicate.r1)}"
-                )
+                sample_args.append(f"{Path(replicate.r1)}")
     else:
         r1 = []
         r2 = []
@@ -276,7 +297,7 @@ def map_reads(
         sample_args += r1
         sample_args.append("-2")
         sample_args += r2
-    
+
     # we allow the library type to be inferred via `-l A` flag.
     alevin_cmd = [
         "salmon",
@@ -288,7 +309,7 @@ def map_reads(
         "-l",
         "A",
         technology_to_flag.get(technology),
-        "--rad"
+        "--rad",
     ]
     alevin_cmd += sample_args
 
@@ -320,15 +341,15 @@ def map_reads(
     if retval != 0:
         raise Exception(f"\tSalmon alevin failed with exit code {retval}")
 
-    print("Transcript mapping complete.")
-
-    return LatchDir("/root/map", "latch:///A_test_rnaseq/map")
+    print("Transcript mapping complete. Packaging Files...")
+    return LatchDir("/root/map", f"{output_name}intermediate_mapping")
 
 
 @large_task
 def quantify_reads(
     map_dir: LatchDir,
     tg_map: LatchFile,
+    output_name: str,
 ) -> LatchDir:
     print("Generating permit list...")
     permit_list_cmd = [
@@ -340,7 +361,7 @@ def quantify_reads(
         "-i",
         str(Path(map_dir)),
         "-o",
-        "quant"
+        "quant",
     ]
 
     permit_list_process = subprocess.Popen(
@@ -362,8 +383,10 @@ def quantify_reads(
 
     retval = permit_list_process.poll()
     if retval != 0:
-        raise Exception(f"\tAlevin-fry generate-permit-list failed with exit code {retval}")
-    
+        raise Exception(
+            f"\tAlevin-fry generate-permit-list failed with exit code {retval}"
+        )
+
     print("Collating RAD files...")
     collate_cmd = [
         "alevin-fry",
@@ -373,7 +396,7 @@ def quantify_reads(
         "-i",
         "quant",
         "-r",
-        str(Path(map_dir))
+        str(Path(map_dir)),
     ]
 
     collate_process = subprocess.Popen(
@@ -396,7 +419,7 @@ def quantify_reads(
     retval = collate_process.poll()
     if retval != 0:
         raise Exception(f"\tAlevin-fry collate failed with exit code {retval}")
-    
+
     print("Quantifying reads...")
     quant_cmd = [
         "alevin-fry",
@@ -405,13 +428,13 @@ def quantify_reads(
         "96",
         "-i",
         "quant",
-        "-r",
+        "-o",
         "quant_res",
         "--tg-map",
         str(Path(tg_map)),
         "--resolution",
         "cr-like",
-        "--use-mtx"
+        "--use-mtx",
     ]
 
     quant_process = subprocess.Popen(
@@ -434,8 +457,10 @@ def quantify_reads(
     retval = quant_process.poll()
     if retval != 0:
         raise Exception(f"\tAlevin-fry quant failed with exit code {retval}")
-    
-    return LatchDir("/root/quant_res", "latch:///A_test_rnaseq/quant_res")
+
+    print("Quantification complete. Packaging Files...")
+    return LatchDir("/root/quant_res", f"{output_name}counts")
+
 
 @workflow
 def scrnaseq(
@@ -567,7 +592,7 @@ def scrnaseq(
             batch_table_column: true
             _tmp:
                 custom_ingestion: auto
-        
+
         read_length:
             The length of the reads in the sample. This is used to generate the splici index.
             If you are providing an index, you can ignore this parameter. If you do not provide
@@ -595,7 +620,7 @@ def scrnaseq(
           __metadata__:
             batch_table_column: true
             display_name: Genome Database Option
-        
+
         technology:
             Sequencing technology used for this experiment. If the technology you used
             is not an option, reach out of aidan@latch.bio so we can implement it.
@@ -656,24 +681,32 @@ def scrnaseq(
             display_name: Custom Output Location
     """
 
+    output_name = get_output_location(
+        custom_output_dir=custom_output_dir,
+        run_name=run_name,
+    )
+
     (splici_index, t2g) = make_splici_index(
-        samples = samples,
-        read_length = read_length,
-        splici_index = splici_index,
-        latch_genome = latch_genome,
-        custom_gtf = custom_gtf,
-        custom_ref_genome = custom_ref_genome,
+        samples=samples,
+        read_length=read_length,
+        splici_index=splici_index,
+        latch_genome=latch_genome,
+        custom_gtf=custom_gtf,
+        custom_ref_genome=custom_ref_genome,
+        output_name=output_name,
     )
 
     mapped_reads = map_reads(
         splici_index=splici_index,
         samples=samples,
         technology=technology,
+        output_name=output_name,
     )
 
     quantified_reads = quantify_reads(
         map_dir=mapped_reads,
         tg_map=t2g,
+        output_name=output_name,
     )
 
     return quantified_reads
@@ -681,27 +714,39 @@ def scrnaseq(
 
 if __name__ == "wf":
     LaunchPlan.create(
-        "wf.__init__.scrnaseq.Test Data",
+        "wf.__init__.scrnaseq.Fast Test Data",
         scrnaseq,
         default_inputs={
             "samples": [
                 Sample(
-                    name="test_sample",
+                    name="dummy_data",
                     replicates=[
                         PairedEndReads(
                             r1=LatchFile(
-                                "s3://latch-public/welcome/scrnaseq/r1.fastq",
+                                "s3://latch-public/welcome/scrnaseq/dummy_L001_R1_001.fastq",
                             ),
                             r2=LatchFile(
-                                "s3://latch-public/welcome/scrnaseq/r2.fastq",
+                                "s3://latch-public/welcome/scrnaseq/dummy_L001_R2_001.fastq",
                             ),
-                        )
+                        ),
+                        PairedEndReads(
+                            r1=LatchFile(
+                                "s3://latch-public/welcome/scrnaseq/dummy_L002_R1_001.fastq",
+                            ),
+                            r2=LatchFile(
+                                "s3://latch-public/welcome/scrnaseq/dummy_L002_R2_001.fastq",
+                            ),
+                        ),
                     ],
-                    strandedness=Strandedness.auto
+                    strandedness=Strandedness.auto,
                 )
             ],
-            "run_name": "Test Run",
-            "custom_gtf": LatchFile("latch:///A_test_rnaseq/inputs/genes.gtf"),
-            "custom_ref_genome": LatchFile("latch:///A_test_rnaseq/inputs/genome.fa")
+            "run_name": "Fast Test Data",
+            "custom_gtf": LatchFile(
+                "s3://latch-public/welcome/scrnaseq/dummy_genes.gtf"
+            ),
+            "custom_ref_genome": LatchFile(
+                "s3://latch-public/welcome/scrnaseq/dummy_genome.fa"
+            ),
         },
     )
