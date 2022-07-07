@@ -12,7 +12,7 @@ from typing import List, Optional, Tuple, Union
 import lgenome
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
-from latch import large_task, small_task, workflow
+from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
 from pyroe import load_fry
 
@@ -116,8 +116,37 @@ class MalformedSpliciIndex(Exception):
     pass
 
 
+class TranscriptomeGenerationError(Exception):
+    pass
+
+
+class IndexGenerationError(Exception):
+    pass
+
+
+class SalmonAlevinError(Exception):
+    pass
+
+
+class AlevinFryQuantError(Exception):
+    pass
+
+
+class AlevinFryCollateError(Exception):
+    pass
+
+
+class AlevinFryGeneratePermitListError(Exception):
+    pass
+
+
+class H5ADGenerationError(Exception):
+    pass
+
+
 @small_task
 def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) -> str:
+    print("Generating output location...")
     run_name = run_name.rstrip("/").lstrip("/")
     if custom_output_dir is None:
         output_base = f"latch:///SCRNA-Seq Outputs/{run_name}/"
@@ -127,6 +156,8 @@ def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) ->
             remote_path += "/"
         output_base = f"{remote_path}{run_name}/"
 
+    print("\tOutput location: " + output_base)
+    message("info", {"title": "Output Directory", "body": output_base})
     return output_base
 
 
@@ -143,9 +174,23 @@ def make_splici_index(
 
     if splici_index is not None:
         print("Using provided splici index")
+        message(
+            "info",
+            {
+                "title": "Using provided splici index",
+                "body": "Skipping index generation",
+            },
+        )
         for file in Path(splici_index).iterdir():
             if file.name.endswith("_t2g_3col.tsv"):
                 return splici_index, file
+        message(
+            "error",
+            {
+                "title": "Malformed Splici Index",
+                "body": "Could not find ...t2g_3col.tsv in provided splici index",
+            },
+        )
         raise MalformedSpliciIndex(
             "Could not find ...t2g_3col.tsv in provided splici index"
         )
@@ -173,14 +218,29 @@ def make_splici_index(
 
         read_length = int(sum(lens) / len(lens))
 
+    message("info", {"title": "Computed Read Length", "body": f"{read_length}"})
     print(f"\tRead Length: {read_length}")
 
     if custom_gtf is not None and custom_ref_genome is not None:
+        message(
+            "info",
+            {
+                "title": "Generating Index Using Custom Genome",
+                "body": f"Genome: {custom_ref_genome.remote_path}\nGTF: {custom_gtf.remote_path}",
+            },
+        )
         print("Using custom genome and GTF file to generate splici index")
 
         genome_path = Path(custom_ref_genome)
         gtf_path = Path(custom_gtf)
     else:
+        message(
+            "info",
+            {
+                "title": "Generating Index Using Latch Genome",
+                "body": f"Name: {latch_genome.name}",
+            },
+        )
         print("Using Latch genome to generate splici index")
         gm = lgenome.GenomeManager(latch_genome.name)
         genome_path = gm.download_ref_genome()
@@ -191,6 +251,7 @@ def make_splici_index(
     flank_trim_length = 5
 
     print(f"\tUsing flank trim length: {flank_trim_length}")
+    message("info", {"title": "Flank Trim Length", "body": f"{flank_trim_length}"})
 
     txome_cmd = [
         "pyroe",
@@ -225,7 +286,14 @@ def make_splici_index(
 
     retval = txome_process.poll()
     if retval != 0:
-        raise Exception(f"\tPyroe failed with exit code {retval}")
+        message(
+            "error",
+            {
+                "title": "Transcriptome Generation Error",
+                "body": f"View logs to see error",
+            },
+        )
+        raise TranscriptomeGenerationError(f"\tPyroe failed with exit code {retval}")
 
     print("Splici transcriptome generated.")
 
@@ -261,8 +329,13 @@ def make_splici_index(
 
     retval = index_process.poll()
     if retval != 0:
-        raise Exception(f"\tSalmon index failed with exit code {retval}")
+        message(
+            "error",
+            {"title": "Index Generation Error", "body": f"View logs to see error"},
+        )
+        raise IndexGenerationError(f"\tSalmon index failed with exit code {retval}")
 
+    message("info", {"title": "Success", "body": ""})
     print("Splici index generated. Packaging Files...")
     return LatchDir("/root/splici_index", f"{output_name}splici_index"), LatchFile(
         f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
@@ -278,6 +351,7 @@ def map_reads(
     output_name: str,
 ) -> LatchDir:
     sample_args = []
+    nrof_samples = 0
     if type(samples[0].replicates[0]) is SingleEndReads:
         sample_args.append("-r")
         for sample in samples:
@@ -287,6 +361,7 @@ def map_reads(
         r1 = []
         r2 = []
         for sample in samples:
+            nrof_samples += 1
             for replicate in sample.replicates:
                 r1.append(str(Path(replicate.r1)))
                 r2.append(str(Path(replicate.r2)))
@@ -294,6 +369,11 @@ def map_reads(
         sample_args += r1
         sample_args.append("-2")
         sample_args += r2
+
+    message(
+        "info", {"title": f"Mapping {nrof_samples} Reads To Transcripts", "body": ""}
+    )
+    print("Mapping reads to transcripts...")
 
     # we allow the library type to be inferred via `-l A` flag.
     alevin_cmd = [
@@ -315,8 +395,6 @@ def map_reads(
         "map",
     ]
 
-    print("Mapping reads to transcripts...")
-
     alevin_process = subprocess.Popen(
         " ".join(alevin_cmd),
         shell=True,
@@ -336,8 +414,12 @@ def map_reads(
 
     retval = alevin_process.poll()
     if retval != 0:
-        raise Exception(f"\tSalmon alevin failed with exit code {retval}")
+        message(
+            "error", {"title": "Salmon Alevin Error", "body": f"View logs to see error"}
+        )
+        raise SalmonAlevinError(f"\tSalmon alevin failed with exit code {retval}")
 
+    message("info", {"title": "Success", "body": ""})
     print("Transcript mapping complete. Packaging Files...")
     return LatchDir("/root/map", f"{output_name}intermediate_mapping")
 
@@ -348,6 +430,7 @@ def quantify_reads(
     tg_map: LatchFile,
     output_name: str,
 ) -> LatchDir:
+    message("info", {"title": f"Generating Whitelist", "body": ""})
     print("Generating permit list...")
     permit_list_cmd = [
         "alevin-fry",
@@ -380,10 +463,19 @@ def quantify_reads(
 
     retval = permit_list_process.poll()
     if retval != 0:
-        raise Exception(
+        message(
+            "error",
+            {
+                "title": "AlevinFry Generate Permit List Error",
+                "body": f"View logs to see error",
+            },
+        )
+        raise AlevinFryGeneratePermitListError(
             f"\tAlevin-fry generate-permit-list failed with exit code {retval}"
         )
+    message("info", {"title": "Success", "body": ""})
 
+    message("info", {"title": f"Collating RAD File", "body": ""})
     print("Collating RAD files...")
     collate_cmd = [
         "alevin-fry",
@@ -415,8 +507,17 @@ def quantify_reads(
 
     retval = collate_process.poll()
     if retval != 0:
-        raise Exception(f"\tAlevin-fry collate failed with exit code {retval}")
+        message(
+            "error",
+            {"title": "AlevinFry Collate Error", "body": f"View logs to see error"},
+        )
+        raise AlevinFryCollateError(
+            f"\tAlevin-fry collate failed with exit code {retval}"
+        )
 
+    message("info", {"title": "Success", "body": ""})
+
+    message("info", {"title": f"Quantifying Reads", "body": ""})
     print("Quantifying reads...")
     quant_cmd = [
         "alevin-fry",
@@ -453,32 +554,90 @@ def quantify_reads(
 
     retval = quant_process.poll()
     if retval != 0:
+        message(
+            "error", {"title": "AlevinFry Quant", "body": f"View logs to see error"}
+        )
         raise Exception(f"\tAlevin-fry quant failed with exit code {retval}")
 
+    message("info", {"title": "Success", "body": ""})
     print("Quantification complete. Packaging Files...")
-    return LatchDir("/root/quant_res", f"{output_name}counts")
+    return LatchDir("/root/quant_res", f"{output_name}raw_counts")
 
 
 @small_task
 def h5ad(
     quant_dir: LatchDir, output_name: str
-) -> Tuple[LatchFile, LatchFile, LatchFile]:
-    print("Generating h5ad file...")
-    h5ad_output_standard = load_fry(frydir=str(Path(quant_dir)), output_format="scRNA")
-    h5ad_output_include_unspliced = load_fry(
-        frydir=str(Path(quant_dir)), output_format="velocity"
-    )
-    h5ad_output_all_layers = load_fry(frydir=str(Path(quant_dir)), output_format="raw")
+) -> Tuple[Optional[LatchFile], Optional[LatchFile], Optional[LatchFile]]:
+    message("info", {"title": f"Generating H5AD Files", "body": ""})
+    print("Generating h5ad files...")
+    failed_count = 0
+    try:
+        h5ad_output_standard = load_fry(
+            frydir=str(Path(quant_dir)), output_format="scRNA"
+        )
+        h5ad_output_standard.write("counts.h5ad")
+        counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
+    except:
+        message(
+            "warning",
+            {
+                "title": "Failed to generate counts H5AD",
+                "body": f"View logs to see error",
+            },
+        )
+        failed_count += 1
+        counts_out = None
 
-    h5ad_output_standard.write("counts.h5ad")
-    h5ad_output_include_unspliced.write("counts_velocity.h5ad")
-    h5ad_output_all_layers.write("counts_USA.h5ad")
+    try:
+        h5ad_output_include_unspliced = load_fry(
+            frydir=str(Path(quant_dir)), output_format="velocity"
+        )
+        h5ad_output_include_unspliced.write("counts_velocity.h5ad")
+        velocity_out = LatchFile(
+            "/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"
+        )
+    except:
+        message(
+            "warning",
+            {
+                "title": "Failed to generate velocity H5AD",
+                "body": f"View logs to see error",
+            },
+        )
+        failed_count += 1
+        velocity_out = None
+
+    try:
+        h5ad_output_all_layers = load_fry(
+            frydir=str(Path(quant_dir)), output_format="raw"
+        )
+        h5ad_output_all_layers.write("counts_USA.h5ad")
+        USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
+    except:
+        message(
+            "warning",
+            {
+                "title": "Failed to generate all layers H5AD",
+                "body": f"View logs to see error",
+            },
+        )
+        failed_count += 1
+        USA_out = None
+
+    if failed_count == 3:
+        raise H5ADGenerationError(f"\tFailed to generate all H5AD files")
 
     return (
-        LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad"),
-        LatchFile("/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"),
-        LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad"),
+        counts_out,
+        velocity_out,
+        USA_out,
     )
+
+
+# @small_task
+# def generate_report(
+#
+# ) -> LatchFile:
 
 
 @workflow
@@ -514,7 +673,6 @@ def scrnaseq(
     [paper](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02151-8),
     which achieves greater accuracy than traditional alignment methods while
     using fewer computational resources.
-
 
     __metadata__:
         display_name: Single Cell RNAseq

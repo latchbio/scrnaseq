@@ -21,12 +21,12 @@ RUN conda install -c defaults \
   -c conda-forge \
   -c bioconda \
   -y -n base --debug \
-  salmon alevin-fry multiqc fastqc pyroe bedtools requests
+  salmon alevin-fry multiqc fastqc pyroe bedtools
 
 # STOP HERE:
 # The following lines are needed to ensure your build environement works
 # correctly with latch.
-RUN ls && python3 -m pip install --upgrade latch lgenome
+RUN python3 -m pip install --upgrade latch lgenome requests
 COPY wf /root/wf
 ARG tag
 ENV FLYTE_INTERNAL_IMAGE $tag
