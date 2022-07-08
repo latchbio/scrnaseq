@@ -651,6 +651,7 @@ def generate_report(
 ) -> LatchFile:
     message("info", {"title": f"Generating QC Report", "body": ""})
     print("Generating QC Report...")
+
     report_cmd = [
         "Rscript",
         "qc.R",
@@ -731,6 +732,20 @@ def scrnaseq(
     is not exposed such as read geometry for the salmon alevin subcommand. If you need this functionality, please reach out to
     aidan@latch.bio so we can expose it for you.
 
+    ### Output Format Specification
+
+    U, S, and A refer to unspliced, spliced, ambiguous respectively.
+
+    The output of this workflow is a directory containing the following files and subdirectories:
+    * alevinQC.html: an alignment and quantification quality control report.
+    * counts.h5ad: a gene by cell H5AD file containing summed spliced and ambiguous counts for each gene.
+    * counts_velocity.h5ad: a gene by cell H5AD file containing the "spliced" layer, which contains the S+A counts, and the "unspliced" layer, which contains the U counts.
+    * counts_USA.h5ad: a gene by cell H5AD file containing a layer for each count type.
+    * raw_counts/: a directory containing the raw output from alevin-fry quantification.
+    * intermediate_mapping/: a directory containing the intermediate mapping RAD files from salmon alevin. Refer to [Splici Index](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material) for further information.
+    * quant_preprocess/: a directory containing the collated RAD files along with the binary cellular barcode whitelist files.
+    * splici_index/: a directory containing the splici index files. This will only be generated if a splici index is not provided.
+
     ### Authors and Maintainers of Underlying Tools
 
     Credit is due for the splici index, selctive alignment (Salmon), and quantification (Alevin-Fry) to the [COMBINELab](https://combine-lab.github.io)
@@ -747,7 +762,6 @@ def scrnaseq(
     which achieves greater accuracy than traditional alignment methods while
     using fewer computational resources.
 
-
     ### Justification for the Splici Index
 
     "The term splici is shorthand for spliced + intronic reference sequence. This reference sequence is prepared
@@ -756,7 +770,8 @@ def scrnaseq(
     play important roles in the various kinds of experiments discussed in this paper. For scRNA-seq data, although one typically focuses on the fragments
     and UMIs arising from the (spliced) transcriptome,and only considers the spliced and ambiguous counts when performing downstream analyses, the
     intronic sequences act similarly to decoy sequences proposed by Srivastava et al. (4). They account for fragments that might otherwise selectively-align
-    or pseudoalign to the transcriptome with lower quality, but that, in fact, derive from some unspliced RNA transcript molecule." -- [From the supplementary material section of the alevin fry paper.](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material
+    or pseudoalign to the transcriptome with lower quality, but that, in fact, derive from some unspliced RNA transcript molecule."
+    -- [From the supplementary material section of the alevin fry paper.](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material
 
     __metadata__:
         display_name: Single Cell RNAseq

@@ -10,7 +10,7 @@ RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-key '95C0FAF38DB3CCAD0C0
 RUN add-apt-repository 'deb https://cloud.r-project.org/bin/linux/debian buster-cran40/'
 
 RUN apt update
-RUN apt install r-recommended r-base-core r-base libcurl4-openssl-dev libssl-dev wget curl pandoc --yes
+RUN apt install r-recommended r-base-core r-base libcurl4-openssl-dev libssl-dev wget curl pandoc pandoc-citeproc --yes
 
 RUN Rscript -e "install.packages('BiocManager')"
 RUN Rscript -e "BiocManager::install('alevinQC')"

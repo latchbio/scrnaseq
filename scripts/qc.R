@@ -4,10 +4,10 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 
-map_dir <- file.path(args[0])
-permit_dir <- file.path(args[1])
-quant_dir <- file.path(args[2])
-name <- args[3]
+map_dir <- file.path(args[1])
+permit_dir <- file.path(args[2])
+quant_dir <- file.path(args[3])
+name <- args[4]
 report_name <- "alevinQC.html"
 
 alevinFryQCReport(
