@@ -2,19 +2,19 @@ suppressPackageStartupMessages({
   library(alevinQC)
 })
 
+args <- commandArgs(trailingOnly = TRUE)
 
-args = commandArgs(trailingOnly=TRUE)
-
-mapD = file.path(args[0])
-permitD = file.path(args[1])
-quantD = file.path(args[2])
-name = args[3]
-reportName = "alevinQC.html"
+map_dir <- file.path(args[0])
+permit_dir <- file.path(args[1])
+quant_dir <- file.path(args[2])
+name <- args[3]
+report_name <- "alevinQC.html"
 
 alevinFryQCReport(
-  mapDir = mapD,
-	permitDir = permitD,
-  quantDir = quantD,
-	sampleId = name,
-	outputFile = reportName,
-	outputFormat="html_document")
+  mapDir = map_dir,
+  permitDir = permit_dir,
+  quantDir = quant_dir,
+  sampleId = name,
+  outputFile = report_name,
+  outputFormat = "html_document"
+)

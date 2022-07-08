@@ -168,7 +168,6 @@ def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) ->
 @large_task
 def make_splici_index(
     samples: List[Sample],
-    read_length: Optional[int],
     splici_index: Optional[LatchDir],
     latch_genome: LatchGenome,
     output_name: str,
@@ -199,28 +198,27 @@ def make_splici_index(
             "Could not find ...t2g_3col.tsv in provided splici index"
         )
 
-    if read_length is None:
-        print("No read length provided.\n\tEstimating read length...")
-        reads_file = Path(samples[0].replicates[0].r2)
-        lens = []
-        if reads_file.suffix == ".gz":
-            with gzip.open(reads_file, "r") as f:
-                for i, l in enumerate(f):
-                    if i > 400:
-                        break
-                    if i % 4 != 1:
-                        continue
-                    lens.append(len(l))
-        else:
-            with open(reads_file, "r") as f:
-                for i, l in enumerate(f):
-                    if i > 400:
-                        break
-                    if i % 4 != 1:
-                        continue
-                    lens.append(len(l))
+    print("Estimating read length...")
+    reads_file = Path(samples[0].replicates[0].r2)
+    lens = []
+    if reads_file.suffix == ".gz":
+        with gzip.open(reads_file, "r") as f:
+            for i, l in enumerate(f):
+                if i > 400:
+                    break
+                if i % 4 != 1:
+                    continue
+                lens.append(len(l))
+    else:
+        with open(reads_file, "r") as f:
+            for i, l in enumerate(f):
+                if i > 400:
+                    break
+                if i % 4 != 1:
+                    continue
+                lens.append(len(l))
 
-        read_length = int(sum(lens) / len(lens))
+    read_length = int(sum(lens) / len(lens))
 
     message("info", {"title": "Computed Read Length", "body": f"{read_length}"})
     print(f"\tRead Length: {read_length}")
@@ -538,7 +536,7 @@ def quantify_reads(
         "--resolution",
         "cr-like",
         "--use-mtx",
-        "--summary-stat"
+        "--summary-stat",
     ]
 
     quant_process = subprocess.Popen(
@@ -567,7 +565,9 @@ def quantify_reads(
 
     message("info", {"title": "Success", "body": ""})
     print("Quantification complete. Packaging Files...")
-    return LatchDir("/root/quant", f"{output_name}quant_preprocessing"), LatchDir("/root/quant_res", f"{output_name}raw_counts")
+    return LatchDir("/root/quant", f"{output_name}quant_preprocessing"), LatchDir(
+        "/root/quant_res", f"{output_name}raw_counts"
+    )
 
 
 @small_task
@@ -680,10 +680,13 @@ def generate_report(
     retval = report_process.poll()
     if retval != 0:
         message(
-            "error", {"title": "Alevin-Fry QC Report", "body": f"View logs to see error"}
+            "error",
+            {"title": "Alevin-Fry QC Report", "body": f"View logs to see error"},
         )
-        raise ReportGenerationError(f"\tAlevin-Fry QC Report failed with exit code {retval}")
-    
+        raise ReportGenerationError(
+            f"\tAlevin-Fry QC Report failed with exit code {retval}"
+        )
+
     message("info", {"title": "Success", "body": ""})
     print("QC Report complete. Packaging Files...")
     return LatchFile("/root/alevinQC.html", f"{output_name}alevinQC.html")
@@ -692,7 +695,6 @@ def generate_report(
 @workflow
 def scrnaseq(
     samples: List[Sample],
-    read_length: Optional[int],
     run_name: str,
     ta_ref_genome_fork: str,
     latch_genome: LatchGenome,
@@ -701,7 +703,14 @@ def scrnaseq(
     custom_ref_genome: Optional[LatchFile] = None,
     splici_index: Optional[LatchDir] = None,
     custom_output_dir: Optional[LatchDir] = None,
-) -> Tuple[LatchDir, LatchDir, Optional[LatchFile], Optional[LatchFile], Optional[LatchFile], LatchFile]:
+) -> Tuple[
+    LatchDir,
+    LatchDir,
+    Optional[LatchFile],
+    Optional[LatchFile],
+    Optional[LatchFile],
+    LatchFile,
+]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
     Single Cell RNA-Seq (Alignment & Quantification)
@@ -713,8 +722,23 @@ def scrnaseq(
     This current iteration of the workflow has three steps:
 
     1. Generating an intron aware index [Splici Index](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material)
-    2. Selective alignment and quantification of reads using [Salmon](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2)
-    3. Quality Control using [alevinQC](https://github.com/csoneson/alevinQC)
+    2. Selective alignment of reads using [Salmon](https://github.com/COMBINE-lab/salmon)
+    3. Quantification of aligned reads using [Alevin-Fry](https://github.com/COMBINE-lab/alevin-fry)
+    4. Quality Control using [alevinQC](https://github.com/csoneson/alevinQC)
+
+    In each of these steps, the user is limited in the set of options available. In a few cases, such as the read length parameter
+    for splici index creation, we estimate read length given the reads. In other cases, some functionality of the underlying tool
+    is not exposed such as read geometry for the salmon alevin subcommand. If you need this functionality, please reach out to
+    aidan@latch.bio so we can expose it for you.
+
+    ### Authors and Maintainers of Underlying Tools
+
+    Credit is due for the splici index, selctive alignment (Salmon), and quantification (Alevin-Fry) to the [COMBINELab](https://combine-lab.github.io)
+    who have created a toolset for the analysis of single cell and bulk RNA-seq data. These are the tools used in this workflow and all intellectual
+    credit is theirs.
+
+    Credit is also due to the author of [alevinQC](https://github.com/csoneson/alevinQC) for collecting the data from alignment and quantification
+    into a single HTML report.
 
     ### More about Selective Alignment
 
@@ -723,11 +747,22 @@ def scrnaseq(
     which achieves greater accuracy than traditional alignment methods while
     using fewer computational resources.
 
+
+    ### Justification for the Splici Index
+
+    "The term splici is shorthand for spliced + intronic reference sequence. This reference sequence is prepared
+    by extracting the spliced transcripts from the reference genome according to the desired annotation (e.g. unfiltered, or filtered for certain
+    classes of transcripts), as well as the collapsed intervals corresponding to the introns of genes. The intronic sequences of the splici reference
+    play important roles in the various kinds of experiments discussed in this paper. For scRNA-seq data, although one typically focuses on the fragments
+    and UMIs arising from the (spliced) transcriptome,and only considers the spliced and ambiguous counts when performing downstream analyses, the
+    intronic sequences act similarly to decoy sequences proposed by Srivastava et al. (4). They account for fragments that might otherwise selectively-align
+    or pseudoalign to the transcriptome with lower quality, but that, in fact, derive from some unspliced RNA transcript molecule." -- [From the supplementary material section of the alevin fry paper.](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material
+
     __metadata__:
         display_name: Single Cell RNAseq
         author:
             name: LatchBio
-            email:
+            email: aidan@latch.bio
             github:
         repository: github.com/latchbio/scrnaseq
         license:
@@ -742,7 +777,6 @@ def scrnaseq(
 
             - params:
                 - samples
-                - read_length
                 - technology
         - section: Alignment & Quantification
           flow:
@@ -750,7 +784,7 @@ def scrnaseq(
                   This workflow uses Salmon's selective alignment described in this
                   [paper](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02151-8),
                   which achieves greater accuracy than traditional alignment methods while
-                  using less computational resources. To fix intron problem...
+                  using less computational resources.
 
             - fork: alignment_quantification_tools
               flows:
@@ -818,17 +852,6 @@ def scrnaseq(
             batch_table_column: true
             _tmp:
                 custom_ingestion: auto
-
-        read_length:
-            The length of the reads in the sample. This is used to generate the splici index.
-            If you are providing an index, you can ignore this parameter. If you do not provide
-            an index or fill out this parameter, the read length will be estimated from the
-            first 100 reads in the first sample.
-
-            __metadata__:
-                display_name: Reads Length
-                batch_table_column: true
-
 
         alignment_quantification_tools:
 
@@ -914,7 +937,6 @@ def scrnaseq(
 
     (splici_index, t2g) = make_splici_index(
         samples=samples,
-        read_length=read_length,
         splici_index=splici_index,
         latch_genome=latch_genome,
         custom_gtf=custom_gtf,
@@ -941,11 +963,11 @@ def scrnaseq(
     )
 
     report = generate_report(
-        map_dir = mapped_reads,
-        permit_dir = preprocessed_quant_dir,
-        quant_dir = quantified_reads,
-        name = run_name,
-        output_name = output_name,
+        map_dir=mapped_reads,
+        permit_dir=preprocessed_quant_dir,
+        quant_dir=quantified_reads,
+        name=run_name,
+        output_name=output_name,
     )
 
     return preprocessed_quant_dir, quantified_reads, simple, velocity, full, report
