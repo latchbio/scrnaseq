@@ -243,6 +243,7 @@ def make_splici_index(
             with gzip.open(genome_path, "rb") as f_in:
                 with open(genome_path.with_suffix(""), "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
+            genome_path = genome_path.with_suffix("")
 
         if gtf_path.suffix == ".gz":
             print("\tUnzipping GTF file")
@@ -250,6 +251,7 @@ def make_splici_index(
             with gzip.open(gtf_path, "rb") as f_in:
                 with open(gtf_path.with_suffix(""), "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
+            gtf_path = gtf_path.with_suffix("")
     else:
         message(
             "info",
