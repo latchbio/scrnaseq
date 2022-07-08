@@ -1,6 +1,7 @@
 """latch/scrnaseq"""
 
 import gzip
+import shutil
 import subprocess
 import sys
 import types
@@ -235,6 +236,20 @@ def make_splici_index(
 
         genome_path = Path(custom_ref_genome)
         gtf_path = Path(custom_gtf)
+
+        if genome_path.suffix == ".gz":
+            print("\tUnzipping genome file")
+            message("info", {"title": "Unzipping Genome", "body": ""})
+            with gzip.open(genome_path, "rb") as f_in:
+                with open(genome_path.with_suffix(""), "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+
+        if gtf_path.suffix == ".gz":
+            print("\tUnzipping GTF file")
+            message("info", {"title": "Unzipping GTF", "body": ""})
+            with gzip.open(gtf_path, "rb") as f_in:
+                with open(gtf_path.with_suffix(""), "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
     else:
         message(
             "info",
