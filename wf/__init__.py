@@ -16,6 +16,7 @@ from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
 from pyroe import load_fry
+from shlex import quote
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -675,7 +676,7 @@ def generate_report(
         str(Path(map_dir)),
         str(Path(permit_dir)),
         str(Path(quant_dir)),
-        name,
+        quote(name),
     ]
 
     report_process = subprocess.Popen(
