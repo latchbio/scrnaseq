@@ -170,6 +170,7 @@ def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) ->
 @large_task
 def make_splici_index(
     samples: List[Sample],
+    read_length: Optional[int],
     splici_index: Optional[LatchDir],
     latch_genome: LatchGenome,
     output_name: str,
@@ -714,6 +715,7 @@ def generate_report(
 @workflow
 def scrnaseq(
     samples: List[Sample],
+    read_length: Optional[int],
     run_name: str,
     ta_ref_genome_fork: str,
     latch_genome: LatchGenome,
@@ -810,6 +812,7 @@ def scrnaseq(
 
             - params:
                 - samples
+                - read_length
                 - technology
         - section: Alignment & Quantification
           flow:
@@ -936,6 +939,15 @@ def scrnaseq(
           __metadata__:
             display_name: Splici index
 
+        read_length:
+            The length of the reads in the sample. This is used to generate the splici index.
+            If you are providing an index, you can ignore this parameter. If you do not provide
+            an index or fill out this parameter, the read length will be estimated from the
+            first 100 reads in the first sample.
+            __metadata__:
+                display_name: Reads Length
+                batch_table_column: true
+
         save_indices:
             If you provided a custom genome you can output the alignment
             indexes generated from this run for use in future runs. This will
@@ -970,6 +982,7 @@ def scrnaseq(
 
     (splici_index, t2g) = make_splici_index(
         samples=samples,
+        read_length=read_length,
         splici_index=splici_index,
         latch_genome=latch_genome,
         custom_gtf=custom_gtf,
