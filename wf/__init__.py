@@ -202,26 +202,27 @@ def make_splici_index(
         )
 
     print("Estimating read length...")
-    reads_file = Path(samples[0].replicates[0].r2)
-    lens = []
-    if reads_file.suffix == ".gz":
-        with gzip.open(reads_file, "r") as f:
-            for i, l in enumerate(f):
-                if i > 400:
-                    break
-                if i % 4 != 1:
-                    continue
-                lens.append(len(l))
-    else:
-        with open(reads_file, "r") as f:
-            for i, l in enumerate(f):
-                if i > 400:
-                    break
-                if i % 4 != 1:
-                    continue
-                lens.append(len(l))
+    if read_length is None:
+        reads_file = Path(samples[0].replicates[0].r2)
+        lens = []
+        if reads_file.suffix == ".gz":
+            with gzip.open(reads_file, "r") as f:
+                for i, l in enumerate(f):
+                    if i > 400:
+                        break
+                    if i % 4 != 1:
+                        continue
+                    lens.append(len(l))
+        else:
+            with open(reads_file, "r") as f:
+                for i, l in enumerate(f):
+                    if i > 400:
+                        break
+                    if i % 4 != 1:
+                        continue
+                    lens.append(len(l))
 
-    read_length = int(sum(lens) / len(lens))
+        read_length = int(sum(lens) / len(lens))
 
     message("info", {"title": "Computed Read Length", "body": f"{read_length}"})
     print(f"\tRead Length: {read_length}")
