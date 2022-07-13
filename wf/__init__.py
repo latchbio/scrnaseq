@@ -203,7 +203,10 @@ def make_splici_index(
 
     print("Estimating read length...")
     if read_length is None:
-        reads_file = Path(samples[0].replicates[0].r2)
+        if isinstance(samples[0].replicates[0], SingleEndReads):
+            reads_file = Path(samples[0].replicates[0].r1)
+        else:
+            reads_file = Path(samples[0].replicates[0].r2)
         lens = []
         if reads_file.suffix == ".gz":
             with gzip.open(reads_file, "r") as f:
