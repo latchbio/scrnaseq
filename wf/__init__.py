@@ -378,11 +378,10 @@ def map_reads(
     sample_args = []
     nrof_samples = 0
 
-    print(type(samples[0].replicates[0]))
-    print(isinstance(samples[0].replicates[0], SingleEndReads))
     if isinstance(samples[0].replicates[0], SingleEndReads):
         sample_args.append("-r")
         for sample in samples:
+            nrof_samples += 1
             for replicate in sample.replicates:
                 sample_args.append(f"{Path(replicate.r1)}")
     else:
@@ -409,11 +408,9 @@ def map_reads(
         "alevin",
         "-p",
         "96",
-        "--dumpUmiGraph",
         "-i",
         str(Path(splici_index)),
-        "-l",
-        "A",
+        "-lA",
         technology_to_flag.get(technology),
         "--rad",
     ]
