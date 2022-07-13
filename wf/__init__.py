@@ -374,7 +374,10 @@ def map_reads(
 ) -> LatchDir:
     sample_args = []
     nrof_samples = 0
-    if type(samples[0].replicates[0]) is SingleEndReads:
+
+    print(type(samples[0].replicates[0]))
+    print(isinstance(samples[0].replicates[0], SingleEndReads))
+    if isinstance(samples[0].replicates[0], SingleEndReads):
         sample_args.append("-r")
         for sample in samples:
             for replicate in sample.replicates:
