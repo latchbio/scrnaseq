@@ -292,8 +292,12 @@ def make_splici_index(
         "--dedup-seqs",
     ]
 
+    txome_cmd = " ".join(txome_cmd)
+    print("Command: " + txome_cmd)
+    message("info", {"title": "Command", "body": txome_cmd})
+
     txome_process = subprocess.Popen(
-        " ".join(txome_cmd),
+        txome_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
@@ -335,8 +339,12 @@ def make_splici_index(
         "96",
     ]
 
+    index_cmd = " ".join(index_cmd)
+    print("Command: " + index_cmd)
+    message("info", {"title": "Command", "body": index_cmd})
+
     index_process = subprocess.Popen(
-        " ".join(index_cmd),
+        index_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
@@ -421,8 +429,12 @@ def map_reads(
         "map",
     ]
 
+    alevin_cmd = " ".join(alevin_cmd)
+    print("Command: " + alevin_cmd)
+    message("info", {"title": "Command", "body": alevin_cmd})
+
     alevin_process = subprocess.Popen(
-        " ".join(alevin_cmd),
+        alevin_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
@@ -470,8 +482,12 @@ def quantify_reads(
         "quant",
     ]
 
+    permit_list_cmd = " ".join(permit_list_cmd)
+    print("Command: " + permit_list_cmd)
+    message("info", {"title": "Command", "body": permit_list_cmd})
+
     permit_list_process = subprocess.Popen(
-        " ".join(permit_list_cmd),
+        permit_list_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
@@ -514,8 +530,12 @@ def quantify_reads(
         str(Path(map_dir)),
     ]
 
+    collate_cmd = " ".join(collate_cmd)
+    print("Command: " + collate_cmd)
+    message("info", {"title": "Command", "body": collate_cmd})
+
     collate_process = subprocess.Popen(
-        " ".join(collate_cmd),
+        collate_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
@@ -562,8 +582,12 @@ def quantify_reads(
         "--summary-stat",
     ]
 
+    quant_cmd = " ".join(quant_cmd)
+    print("Command: " + quant_cmd)
+    message("info", {"title": "Command", "body": quant_cmd})
+
     quant_process = subprocess.Popen(
-        " ".join(quant_cmd),
+        quant_cmd,
         shell=True,
         errors="replace",
         encoding="utf-8",
