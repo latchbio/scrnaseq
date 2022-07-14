@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from shlex import quote
 from typing import List, Optional, Tuple, Union
+import time
 
 import lgenome
 from dataclasses_json import dataclass_json
@@ -355,33 +356,45 @@ def make_splici_index(
     print("Command: " + txome_cmd)
     message("info", {"title": "Command", "body": txome_cmd})
 
-    txome_process = subprocess.Popen(
-        txome_cmd,
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
+    pyroe_attempts = 0
     while True:
-        realtime_output = txome_process.stdout.readline()
+        try:
+            # linear backoff of failed network requests
+            time.sleep(pyroe_attempts)
+            print("Pyroe Attempt: " + str(pyroe_attempts + 1))
+            txome_process = subprocess.Popen(
+                txome_cmd,
+                shell=True,
+                errors="replace",
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
 
-        if realtime_output == "" and txome_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
+            while True:
+                realtime_output = txome_process.stdout.readline()
 
-    retval = txome_process.poll()
-    if retval != 0:
-        message(
-            "error",
-            {
-                "title": "Transcriptome Generation Error",
-                "body": f"View logs to see error",
-            },
-        )
-        raise TranscriptomeGenerationError(f"\tPyroe failed with exit code {retval}")
+                if realtime_output == "" and txome_process.poll() is not None:
+                    break
+                if realtime_output:
+                    print("\t" + realtime_output.strip())
+            
+            retval = txome_process.poll()
+            if retval == 0:
+                break
+            else:
+                raise TranscriptomeGenerationError(f"\tPyroe failed with exit code {retval}")
+        except TranscriptomeGenerationError as e:
+            pyroe_attempts += 1
+            if pyroe_attempts == 5:
+                message(
+                    "error",
+                    {
+                        "title": "Transcriptome Generation Error",
+                        "body": f"View logs to see error",
+                    },
+                )
+                raise e
 
     print("Splici transcriptome generated.")
 
