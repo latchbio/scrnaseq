@@ -8,6 +8,7 @@ import types
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from shlex import quote
 from typing import List, Optional, Tuple, Union
 
 import lgenome
@@ -16,7 +17,6 @@ from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
 from pyroe import load_fry
-from shlex import quote
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -119,6 +119,10 @@ class MalformedSpliciIndex(Exception):
 
 
 class TranscriptomeGenerationError(Exception):
+    pass
+
+
+class GTFGenerationError(Exception):
     pass
 
 
@@ -258,6 +262,61 @@ def make_splici_index(
                 with open(gtf_path.with_suffix(""), "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
             gtf_path = gtf_path.with_suffix("")
+
+        if (
+            gtf_path.suffix == ".gff3"
+            or gtf_path.suffix == ".gff"
+            or gtf_path.suffix == ".gff2"
+        ):
+            print("\tConverting GFF to GTF3")
+            message(
+                "warning",
+                {"title": "Attempting to convert GFF to GTF", "body": f"{gtf_path}"},
+            )
+            new_gtf_path = gtf_path.with_suffix(".gtf")
+
+            gffread_cmd = [
+                "gffread",
+                str(gtf_path),
+                "-T",
+                "-o",
+                str(new_gtf_path),
+            ]
+
+            gffread_cmd = " ".join(gffread_cmd)
+            print("Command: " + gffread_cmd)
+            message("info", {"title": "Command", "body": gffread_cmd})
+
+            gffread_process = subprocess.Popen(
+                gffread_cmd,
+                shell=True,
+                errors="replace",
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+
+            while True:
+                realtime_output = gffread_process.stdout.readline()
+
+                if realtime_output == "" and gffread_process.poll() is not None:
+                    break
+                if realtime_output:
+                    print("\t" + realtime_output.strip())
+
+            retval = gffread_process.poll()
+            if retval != 0:
+                message(
+                    "error",
+                    {
+                        "title": "GTF Generation Error",
+                        "body": f"View logs to see error",
+                    },
+                )
+                raise GTFGenerationError(f"\tGffread failed with error code {retval}")
+
+            gtf_path = new_gtf_path
+
     else:
         message(
             "info",
@@ -822,7 +881,7 @@ def scrnaseq(
     -- [From the supplementary material section of the alevin fry paper.](https://www.biorxiv.org/content/10.1101/2021.06.29.450377v2.supplementary-material
 
     __metadata__:
-        display_name: Single Cell RNAseq
+        display_name: Single Cell RNA-seq
         author:
             name: LatchBio
             email: aidan@latch.bio
@@ -956,7 +1015,7 @@ def scrnaseq(
           __metadata__:
             display_name: Annotation File
             appearance:
-                detail: (.gtf)
+                detail: (gtf / gff, text or gzipped))
 
         splici_index:
             You are able to provide a prebuilt splici index directory for your genome.
