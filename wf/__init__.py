@@ -1,17 +1,19 @@
 """latch/scrnaseq"""
 
 import gzip
+import json
 import shutil
 import subprocess
 import sys
+import time
 import types
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from shlex import quote
-from typing import List, Optional, Tuple, Union
-import time
+from typing import Dict, List, Optional, Tuple, Union
 
+import anndata
 import lgenome
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
@@ -93,6 +95,27 @@ technology_to_flag = {
 }
 
 
+@dataclass
+class ProtocolGeometry:
+    barcode_length: int
+    umi_length: int
+
+
+technology_to_geometry = {
+    Technology.dropseq: ProtocolGeometry(barcode_length=12, umi_length=8),
+    Technology.chromiumv3: ProtocolGeometry(barcode_length=16, umi_length=12),
+    Technology.chromiumv2: ProtocolGeometry(barcode_length=16, umi_length=10),
+    Technology.gemcode: ProtocolGeometry(barcode_length=14, umi_length=10),
+    Technology.citeseq: ProtocolGeometry(barcode_length=16, umi_length=10),
+    Technology.celseq: ProtocolGeometry(barcode_length=8, umi_length=6),
+    Technology.celseq2: ProtocolGeometry(barcode_length=6, umi_length=6),
+    Technology.splitseqV1: ProtocolGeometry(barcode_length=24, umi_length=10),
+    Technology.splitseqV2: ProtocolGeometry(barcode_length=24, umi_length=10),
+    Technology.quartzseq2: ProtocolGeometry(barcode_length=15, umi_length=8),
+    Technology.sciseq3: ProtocolGeometry(barcode_length=21, umi_length=8),
+}
+
+
 class LatchGenome(Enum):
     RefSeq_hg38_p14 = "Homo sapiens (RefSeq hg38.p14)"
     RefSeq_T2T_CHM13v2_0 = "Homo sapiens (RefSeq T2T-CHM13v2.0)"
@@ -152,6 +175,14 @@ class H5ADGenerationError(Exception):
 
 
 class ReportGenerationError(Exception):
+    pass
+
+
+class SingleEndReadsUnsupported(Exception):
+    pass
+
+
+class SampleToCellularBarcodeMapError(Exception):
     pass
 
 
@@ -378,12 +409,14 @@ def make_splici_index(
                     break
                 if realtime_output:
                     print("\t" + realtime_output.strip())
-            
+
             retval = txome_process.poll()
             if retval == 0:
                 break
             else:
-                raise TranscriptomeGenerationError(f"\tPyroe failed with exit code {retval}")
+                raise TranscriptomeGenerationError(
+                    f"\tPyroe failed with exit code {retval}"
+                )
         except TranscriptomeGenerationError as e:
             pyroe_attempts += 1
             if pyroe_attempts == 5:
@@ -454,16 +487,12 @@ def map_reads(
     samples: List[Sample],
     technology: Technology,
     output_name: str,
-) -> LatchDir:
+) -> Tuple[LatchDir, LatchFile]:
     sample_args = []
     nrof_samples = 0
 
     if isinstance(samples[0].replicates[0], SingleEndReads):
-        sample_args.append("-r")
-        for sample in samples:
-            nrof_samples += 1
-            for replicate in sample.replicates:
-                sample_args.append(f"{Path(replicate.r1)}")
+        raise SingleEndReadsUnsupported("Single end reads are not supported")
     else:
         r1 = []
         r2 = []
@@ -530,8 +559,48 @@ def map_reads(
         raise SalmonAlevinError(f"\tSalmon alevin failed with exit code {retval}")
 
     message("info", {"title": "Success", "body": ""})
+
+    print("Generating sample to cellular barcode map...")
+    message(
+        "info",
+        {"title": f"Mapping {nrof_samples} Samples To Cellular Barcodes", "body": ""},
+    )
+
+    try:
+        cb_to_sample_map = {}
+        for sample in samples:
+            for i, replicate in enumerate(sample.replicates):
+                with open(Path(replicate.r1)) as f:
+                    for j, line in enumerate(f.readlines()):
+                        if j % 4 == 1:
+                            barcode = line.strip()[
+                                : technology_to_geometry.get(technology).barcode_length
+                            ]
+                            if barcode not in sample.cellular_barcodes:
+                                cb_to_sample_map[barcode] = sample.name
+    except Exception as e:
+        message(
+            "error",
+            {
+                "title": "Sample to Cellular Barcode Mapping Error",
+                "body": f"View logs to see error",
+            },
+        )
+        raise SampleToCellularBarcodeMapError(
+            f"\tSample to cellular barcode map failed with error {e}"
+        )
+
+    with open("cb_to_sample_map.json", "w") as f:
+        json.dump(cb_to_sample_map, f)
+
+    print("Sample to cellular barcode map generated.")
+    message("info", {"title": "Success", "body": ""})
+
     print("Transcript mapping complete. Packaging Files...")
-    return LatchDir("/root/map", f"{output_name}intermediate_mapping")
+    return LatchDir("/root/map", f"{output_name}intermediate_mapping"), LatchFile(
+        "/root/cb_to_sample_map.json",
+        f"{output_name}intermediate_mapping/cb_to_sample_map.json",
+    )
 
 
 @large_task
@@ -691,14 +760,19 @@ def quantify_reads(
 
 @small_task
 def h5ad(
-    quant_dir: LatchDir, output_name: str
+    quant_dir: LatchDir, output_name: str, cb_to_sample_map: LatchFile
 ) -> Tuple[Optional[LatchFile], Optional[LatchFile], Optional[LatchFile]]:
     message("info", {"title": f"Generating H5AD Files", "body": ""})
     print("Generating h5ad files...")
     failed_count = 0
+
+    cb_sample_map: Dict[str, str] = json.load(open(str(Path(cb_to_sample_map))))
     try:
-        h5ad_output_standard = load_fry(
+        h5ad_output_standard: anndata.AnnData = load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
+        )
+        h5ad_output_standard.obs["sample"] = cb_sample_map.get(
+            h5ad_output_standard.obs_names, "ERROR"
         )
         h5ad_output_standard.write("counts.h5ad")
         counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
@@ -714,8 +788,11 @@ def h5ad(
         counts_out = None
 
     try:
-        h5ad_output_include_unspliced = load_fry(
+        h5ad_output_include_unspliced: anndata.AnnData = load_fry(
             frydir=str(Path(quant_dir)), output_format="velocity"
+        )
+        h5ad_output_include_unspliced.obs["sample"] = cb_sample_map.get(
+            h5ad_output_include_unspliced.obs_names, "ERROR"
         )
         h5ad_output_include_unspliced.write("counts_velocity.h5ad")
         velocity_out = LatchFile(
@@ -733,8 +810,11 @@ def h5ad(
         velocity_out = None
 
     try:
-        h5ad_output_all_layers = load_fry(
+        h5ad_output_all_layers: anndata.AnnData = load_fry(
             frydir=str(Path(quant_dir)), output_format="raw"
+        )
+        h5ad_output_all_layers.obs["sample"] = cb_sample_map.get(
+            h5ad_output_all_layers.obs_names, "ERROR"
         )
         h5ad_output_all_layers.write("counts_USA.h5ad")
         USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
@@ -1090,7 +1170,7 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    mapped_reads = map_reads(
+    (mapped_reads, cb_to_sample_map) = map_reads(
         splici_index=splici_index,
         samples=samples,
         technology=technology,
@@ -1105,6 +1185,7 @@ def scrnaseq(
 
     (simple, velocity, full) = h5ad(
         quant_dir=quantified_reads,
+        cb_to_sample_map=cb_to_sample_map,
         output_name=output_name,
     )
 
