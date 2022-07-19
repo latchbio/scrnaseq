@@ -569,14 +569,14 @@ def map_reads(
     try:
         cb_to_sample_map = {}
         for sample in samples:
-            for i, replicate in enumerate(sample.replicates):
+            for replicate in sample.replicates:
                 with open(Path(replicate.r1)) as f:
                     for j, line in enumerate(f.readlines()):
                         if j % 4 == 1:
                             barcode = line.strip()[
                                 : technology_to_geometry.get(technology).barcode_length
                             ]
-                            if barcode not in sample:
+                            if barcode not in cb_to_sample_map:
                                 cb_to_sample_map[barcode] = sample.name
     except Exception as e:
         message(
