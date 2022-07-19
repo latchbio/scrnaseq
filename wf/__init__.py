@@ -576,7 +576,7 @@ def map_reads(
                             barcode = line.strip()[
                                 : technology_to_geometry.get(technology).barcode_length
                             ]
-                            if barcode not in sample.cellular_barcodes:
+                            if barcode not in sample:
                                 cb_to_sample_map[barcode] = sample.name
     except Exception as e:
         message(
