@@ -15,11 +15,11 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import anndata
 import lgenome
+import pyroe
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
-from pyroe import load_fry
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -768,7 +768,7 @@ def h5ad(
 
     cb_sample_map: Dict[str, str] = json.load(open(str(Path(cb_to_sample_map))))
     try:
-        h5ad_output_standard: anndata.AnnData = load_fry(
+        h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
         )
         h5ad_output_standard.obs["sample"] = cb_sample_map.get(
@@ -788,7 +788,7 @@ def h5ad(
         counts_out = None
 
     try:
-        h5ad_output_include_unspliced: anndata.AnnData = load_fry(
+        h5ad_output_include_unspliced: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="velocity"
         )
         h5ad_output_include_unspliced.obs["sample"] = cb_sample_map.get(
@@ -810,7 +810,7 @@ def h5ad(
         velocity_out = None
 
     try:
-        h5ad_output_all_layers: anndata.AnnData = load_fry(
+        h5ad_output_all_layers: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="raw"
         )
         h5ad_output_all_layers.obs["sample"] = cb_sample_map.get(
