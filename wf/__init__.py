@@ -818,13 +818,17 @@ def h5ad(
 
     gene_info_by_input = {}
     for result in res:
-        gene_info_by_input[result["query"]] = result
+        try:
+            gene_info_by_input[result["query"]] = result
+        except:
+            print(f"Odd result in gene mining: {result}")
+            pass
 
     gene_symbols = []
     gene_types = []
     gene_long_name = []
     for gid in gene_names:
-        query_res: Dict[str, str] = gene_info_by_input[gid]
+        query_res: Dict[str, str] = gene_info_by_input.get(gid, Dict())
         gene_symbols.append(query_res.get("symbol", None))
         gene_types.append(query_res.get("type_of_gene", None))
         gene_long_name.append(query_res.get("name", None))
