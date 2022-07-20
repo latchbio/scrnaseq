@@ -15,11 +15,13 @@ from typing import Callable, Dict, List, Optional, TextIO, Tuple, Union
 
 import anndata
 import lgenome
+import mygene
 import pyroe
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
+from marshmallow_jsonschema import JSONSchema
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -38,6 +40,42 @@ def ___repr__(self):
 
 
 LatchFile.__repr__ = types.MethodType(___repr__, LatchFile)
+
+
+MYGENE_SCOPES = [
+    "entrezgene",
+    "ensembl.gene",
+    "symbol",
+    "name",
+    "alias",
+    "refseq",
+    "unigene",
+    "homologene",
+    "accession",
+    "ensembl.transcript",
+    "ensembl.protein",
+    "uniprot",
+    "pdb",
+    "prosite",
+    "pfam",
+    "interpro",
+    "mim",
+    "pharmgkb",
+    "reporter",
+    "reagent",
+    "go",
+    "hgnc",
+    "hprd",
+    "mgi",
+    "rgd",
+    "flybase",
+    "wormbase",
+    "zfin",
+    "tair",
+    "xenbase",
+    "mirbase",
+    "retired",
+]
 
 
 @dataclass_json
@@ -767,11 +805,38 @@ def quantify_reads(
 def h5ad(
     quant_dir: LatchDir, output_name: str, cb_to_sample_map: LatchFile
 ) -> Tuple[Optional[LatchFile], Optional[LatchFile], Optional[LatchFile]]:
+    message("info", {"title": f"Mining For Gene Metadata", "body": ""})
+    print("Mining for gene metadata...")
+
+    h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
+        frydir=str(Path(quant_dir)), output_format="scRNA"
+    )
+    gene_names = h5ad_output_standard.var_names
+
+    mg = mygene.MyGeneInfo()
+    res = mg.querymany(gene_names, scopes=",".join(MYGENE_SCOPES), fields="all")
+
+    gene_info_by_input = {}
+    for result in res:
+        gene_info_by_input[result["query"]] = result
+
+    gene_symbols = []
+    gene_types = []
+    gene_long_name = []
+    for gid in gene_names:
+        query_res: Dict[str, str] = gene_info_by_input[gid]
+        gene_symbols.append(query_res.get("symbol", None))
+        gene_types.append(query_res.get("type_of_gene", None))
+        gene_long_name.append(query_res.get("name", None))
+
+    message("info", {"title": f"Success", "body": ""})
+
     message("info", {"title": f"Generating H5AD Files", "body": ""})
     print("Generating h5ad files...")
     failed_count = 0
 
     cb_sample_map: Dict[str, str] = json.load(open(str(Path(cb_to_sample_map))))
+
     try:
         h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
@@ -780,6 +845,9 @@ def h5ad(
             cb_sample_map.get(x, "ERROR") for x in h5ad_output_standard.obs_names
         ]
         h5ad_output_standard.obs["sample"] = sample_annotations
+        h5ad_output_standard.var["mygene_symbol"] = gene_symbols
+        h5ad_output_standard.var["mygene_type"] = gene_types
+        h5ad_output_standard.var["mygene_name"] = gene_long_name
         h5ad_output_standard.write("counts.h5ad")
         counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
     except Exception as e:
@@ -803,6 +871,9 @@ def h5ad(
             for x in h5ad_output_include_unspliced.obs_names
         ]
         h5ad_output_include_unspliced.obs["sample"] = sample_annotations
+        h5ad_output_include_unspliced.var["mygene_symbol"] = gene_symbols
+        h5ad_output_include_unspliced.var["mygene_type"] = gene_types
+        h5ad_output_include_unspliced.var["mygene_name"] = gene_long_name
         h5ad_output_include_unspliced.write("counts_velocity.h5ad")
         velocity_out = LatchFile(
             "/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"
@@ -827,6 +898,9 @@ def h5ad(
             cb_sample_map.get(x, "ERROR") for x in h5ad_output_all_layers.obs_names
         ]
         h5ad_output_all_layers.obs["sample"] = sample_annotations
+        h5ad_output_all_layers.var["mygene_symbol"] = gene_symbols
+        h5ad_output_all_layers.var["mygene_type"] = gene_types
+        h5ad_output_all_layers.var["mygene_name"] = gene_long_name
         h5ad_output_all_layers.write("counts_USA.h5ad")
         USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
     except Exception as e:

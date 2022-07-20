@@ -28,7 +28,7 @@ RUN conda install -c defaults \
   -y -n base --debug \
   salmon alevin-fry multiqc fastqc pyroe bedtools gffread
 
-RUN python3 -m pip install --upgrade latch lgenome requests
+RUN python3 -m pip install --upgrade latch lgenome requests mygene
 COPY wf /root/wf
 COPY scripts/qc.R /root/qc.R
 ARG tag
