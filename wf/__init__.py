@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from shlex import quote
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, TextIO, Tuple, Union
 
 import anndata
 import lgenome
@@ -24,8 +24,12 @@ from latch.types import LatchDir, LatchFile
 sys.stdout.reconfigure(line_buffering=True)
 
 
-def run(cmd: List[str]):
-    subprocess.run(cmd, check=True)
+def is_gzipped(path: Path) -> bool:
+    return path.suffix == ".gz"
+
+
+def safe_open_fxn(path: Path) -> Callable[[Path, str], TextIO]:
+    return gzip.open if is_gzipped(path) else open
 
 
 # TODO - patch latch with proper def __repr__ -> str
@@ -244,22 +248,13 @@ def make_splici_index(
         else:
             reads_file = Path(samples[0].replicates[0].r2)
         lens = []
-        if reads_file.suffix == ".gz":
-            with gzip.open(reads_file, "r") as f:
-                for i, l in enumerate(f):
-                    if i > 400:
-                        break
-                    if i % 4 != 1:
-                        continue
-                    lens.append(len(l))
-        else:
-            with open(reads_file, "r") as f:
-                for i, l in enumerate(f):
-                    if i > 400:
-                        break
-                    if i % 4 != 1:
-                        continue
-                    lens.append(len(l))
+        with safe_open_fxn(reads_file)(reads_file, "r") as f:
+            for i, l in enumerate(f):
+                if i > 400:
+                    break
+                if i % 4 != 1:
+                    continue
+                lens.append(len(l))
 
         read_length = int(sum(lens) / len(lens))
 
@@ -279,7 +274,7 @@ def make_splici_index(
         genome_path = Path(custom_ref_genome)
         gtf_path = Path(custom_gtf)
 
-        if genome_path.suffix == ".gz":
+        if is_gzipped(genome_path):
             print("\tUnzipping genome file")
             message("info", {"title": "Unzipping Genome", "body": ""})
             with gzip.open(genome_path, "rb") as f_in:
@@ -287,7 +282,7 @@ def make_splici_index(
                     shutil.copyfileobj(f_in, f_out)
             genome_path = genome_path.with_suffix("")
 
-        if gtf_path.suffix == ".gz":
+        if is_gzipped(gtf_path):
             print("\tUnzipping GTF file")
             message("info", {"title": "Unzipping GTF", "body": ""})
             with gzip.open(gtf_path, "rb") as f_in:
@@ -507,9 +502,15 @@ def map_reads(
         sample_args += r2
 
     message(
-        "info", {"title": f"Mapping {nrof_samples} Samples To Transcripts", "body": ""}
+        "info",
+        {
+            "title": f"Mapping {nrof_samples} Sample{'s' if nrof_samples > 1 else ''} To Transcripts",
+            "body": "",
+        },
     )
-    print("Mapping reads to transcripts...")
+    print(
+        f"Mapping {nrof_samples} sample{'s' if nrof_samples > 1 else ''} to transcripts..."
+    )
 
     # we allow the library type to be inferred via `-l A` flag.
     alevin_cmd = [
@@ -563,14 +564,17 @@ def map_reads(
     print("Generating sample to cellular barcode map...")
     message(
         "info",
-        {"title": f"Mapping {nrof_samples} Samples To Cellular Barcodes", "body": ""},
+        {
+            "title": f"Mapping {nrof_samples} Sample{'s' if nrof_samples > 1 else ''} To Cellular Barcodes",
+            "body": "",
+        },
     )
 
     try:
         cb_to_sample_map = {}
         for sample in samples:
             for replicate in sample.replicates:
-                with open(Path(replicate.r1)) as f:
+                with safe_open_fxn(Path(replicate.r1))(Path(replicate.r1), "r") as f:
                     for j, line in enumerate(f.readlines()):
                         if j % 4 == 1:
                             barcode = line.strip()[
@@ -578,6 +582,7 @@ def map_reads(
                             ]
                             if barcode not in cb_to_sample_map:
                                 cb_to_sample_map[barcode] = sample.name
+
     except Exception as e:
         message(
             "error",
