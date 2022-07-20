@@ -248,7 +248,7 @@ def make_splici_index(
         else:
             reads_file = Path(samples[0].replicates[0].r2)
         lens = []
-        with safe_open_fxn(reads_file)(reads_file, "r") as f:
+        with safe_open_fxn(reads_file)(reads_file, "rt") as f:
             for i, l in enumerate(f):
                 if i > 400:
                     break
@@ -574,8 +574,8 @@ def map_reads(
         cb_to_sample_map = {}
         for sample in samples:
             for replicate in sample.replicates:
-                with safe_open_fxn(Path(replicate.r1))(Path(replicate.r1), "r") as f:
-                    for j, line in enumerate(f.readlines()):
+                with safe_open_fxn(Path(replicate.r1))(Path(replicate.r1), "rt") as f:
+                    for j, line in enumerate(f):
                         if j % 4 == 1:
                             barcode = line.strip()[
                                 : technology_to_geometry.get(technology).barcode_length
