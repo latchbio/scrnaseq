@@ -771,12 +771,13 @@ def h5ad(
         h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
         )
-        h5ad_output_standard.obs["sample"] = cb_sample_map.get(
-            h5ad_output_standard.obs_names, "ERROR"
-        )
+        sample_annotations = [
+            cb_sample_map.get(x, "ERROR") for x in h5ad_output_standard.obs_names
+        ]
+        h5ad_output_standard.obs["sample"] = sample_annotations
         h5ad_output_standard.write("counts.h5ad")
         counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
-    except:
+    except Exception as e:
         message(
             "warning",
             {
@@ -784,6 +785,7 @@ def h5ad(
                 "body": f"View logs to see error",
             },
         )
+        print(str(e))
         failed_count += 1
         counts_out = None
 
@@ -791,14 +793,16 @@ def h5ad(
         h5ad_output_include_unspliced: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="velocity"
         )
-        h5ad_output_include_unspliced.obs["sample"] = cb_sample_map.get(
-            h5ad_output_include_unspliced.obs_names, "ERROR"
-        )
+        sample_annotations = [
+            cb_sample_map.get(x, "ERROR")
+            for x in h5ad_output_include_unspliced.obs_names
+        ]
+        h5ad_output_include_unspliced.obs["sample"] = sample_annotations
         h5ad_output_include_unspliced.write("counts_velocity.h5ad")
         velocity_out = LatchFile(
             "/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"
         )
-    except:
+    except Exception as e:
         message(
             "warning",
             {
@@ -806,6 +810,7 @@ def h5ad(
                 "body": f"View logs to see error",
             },
         )
+        print(str(e))
         failed_count += 1
         velocity_out = None
 
@@ -813,12 +818,13 @@ def h5ad(
         h5ad_output_all_layers: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="raw"
         )
-        h5ad_output_all_layers.obs["sample"] = cb_sample_map.get(
-            h5ad_output_all_layers.obs_names, "ERROR"
-        )
+        sample_annotations = [
+            cb_sample_map.get(x, "ERROR") for x in h5ad_output_all_layers.obs_names
+        ]
+        h5ad_output_all_layers.obs["sample"] = sample_annotations
         h5ad_output_all_layers.write("counts_USA.h5ad")
         USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
-    except:
+    except Exception as e:
         message(
             "warning",
             {
@@ -826,6 +832,7 @@ def h5ad(
                 "body": f"View logs to see error",
             },
         )
+        print(str(e))
         failed_count += 1
         USA_out = None
 
