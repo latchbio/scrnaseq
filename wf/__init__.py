@@ -829,9 +829,9 @@ def h5ad(
     gene_long_name = []
     for gid in gene_names:
         query_res: Dict[str, str] = gene_info_by_input.get(gid, dict())
-        gene_symbols.append(query_res.get("symbol", None))
-        gene_types.append(query_res.get("type_of_gene", None))
-        gene_long_name.append(query_res.get("name", None))
+        gene_symbols.append(query_res.get("symbol", "NA"))
+        gene_types.append(query_res.get("type_of_gene", "NA"))
+        gene_long_name.append(query_res.get("name", "NA"))
 
     message("info", {"title": f"Success", "body": ""})
 
