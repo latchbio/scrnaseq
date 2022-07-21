@@ -524,6 +524,14 @@ def map_reads(
     sample_args = []
     nrof_samples = 0
 
+    message(
+        "info",
+        {
+            "title": f"Downloading Sample Data",
+            "body": "",
+        },
+    )
+    print(f"Downloading sample data...")
     if isinstance(samples[0].replicates[0], SingleEndReads):
         raise SingleEndReadsUnsupported("Single end reads are not supported")
     else:
@@ -538,6 +546,15 @@ def map_reads(
         sample_args += r1
         sample_args.append("-2")
         sample_args += r2
+
+    message(
+        "info",
+        {
+            "title": f"Success",
+            "body": "",
+        },
+    )
+    print("Done")
 
     message(
         "info",
