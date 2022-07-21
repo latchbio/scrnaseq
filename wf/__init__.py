@@ -826,12 +826,63 @@ def h5ad(
 
     gene_symbols = []
     gene_types = []
-    gene_long_name = []
+    gene_long_names = []
+    found_symbols = 0
+    found_types = 0
+    found_long_names = 0
     for gid in gene_names:
         query_res: Dict[str, str] = gene_info_by_input.get(gid, dict())
-        gene_symbols.append(query_res.get("symbol", "NA"))
-        gene_types.append(query_res.get("type_of_gene", "NA"))
-        gene_long_name.append(query_res.get("name", "NA"))
+        gene_symbol = query_res.get("symbol", "NA")
+        if gene_symbol != "NA":
+            found_symbols += 1
+        gene_symbols.append(gene_symbol)
+        gene_type = query_res.get("type_of_gene", "NA")
+        if gene_type != "NA":
+            found_types += 1
+        gene_types.append(gene_type)
+        gene_long_name = query_res.get("name", "NA")
+        if gene_long_name != "NA":
+            found_long_names += 1
+        gene_long_names.append(gene_long_name)
+
+    if found_symbols > 0.5 * len(gene_names):
+        message("info", {"title": "Success", "body": f"Found {found_symbols} symbols"})
+        print("Successfully mined for gene symbols")
+    else:
+        message(
+            "warning",
+            {
+                "title": "Less than 50 Percent Gene Symbol Count",
+                "body": f"Found {found_symbols} symbols",
+            },
+        )
+        print("Low gene symbol count")
+    if found_types > 0.5 * len(gene_names):
+        message("info", {"title": "Success", "body": f"Found {found_types} types"})
+        print("Successfully mined for gene types")
+    else:
+        message(
+            "warning",
+            {
+                "title": "Less than 50 Percent Gene Type Count",
+                "body": f"Found {found_types} types",
+            },
+        )
+        print("Low gene type count")
+    if found_long_names > 0.5 * len(gene_names):
+        message(
+            "info", {"title": "Success", "body": f"Found {found_long_names} long names"}
+        )
+        print("Successfully mined for gene long names")
+    else:
+        message(
+            "warning",
+            {
+                "title": "Less than 50 Percent Gene Name Count",
+                "body": f"Found {found_long_names} names",
+            },
+        )
+        print("Low gene name count")
 
     message("info", {"title": f"Success", "body": ""})
 
@@ -851,7 +902,7 @@ def h5ad(
         h5ad_output_standard.obs["sample"] = sample_annotations
         h5ad_output_standard.var["mygene_symbol"] = gene_symbols
         h5ad_output_standard.var["mygene_type"] = gene_types
-        h5ad_output_standard.var["mygene_name"] = gene_long_name
+        h5ad_output_standard.var["mygene_name"] = gene_long_names
         h5ad_output_standard.write("counts.h5ad")
         counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
     except Exception as e:
@@ -877,7 +928,7 @@ def h5ad(
         h5ad_output_include_unspliced.obs["sample"] = sample_annotations
         h5ad_output_include_unspliced.var["mygene_symbol"] = gene_symbols
         h5ad_output_include_unspliced.var["mygene_type"] = gene_types
-        h5ad_output_include_unspliced.var["mygene_name"] = gene_long_name
+        h5ad_output_include_unspliced.var["mygene_name"] = gene_long_names
         h5ad_output_include_unspliced.write("counts_velocity.h5ad")
         velocity_out = LatchFile(
             "/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"
@@ -904,7 +955,7 @@ def h5ad(
         h5ad_output_all_layers.obs["sample"] = sample_annotations
         h5ad_output_all_layers.var["mygene_symbol"] = gene_symbols
         h5ad_output_all_layers.var["mygene_type"] = gene_types
-        h5ad_output_all_layers.var["mygene_name"] = gene_long_name
+        h5ad_output_all_layers.var["mygene_name"] = gene_long_names
         h5ad_output_all_layers.write("counts_USA.h5ad")
         USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
     except Exception as e:
