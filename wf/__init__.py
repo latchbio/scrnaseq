@@ -801,7 +801,7 @@ def quantify_reads(
     )
 
 
-@small_task
+@large_task
 def h5ad(
     quant_dir: LatchDir, output_name: str, cb_to_sample_map: LatchFile
 ) -> Tuple[Optional[LatchFile], Optional[LatchFile], Optional[LatchFile]]:
@@ -930,7 +930,7 @@ def h5ad(
     )
 
 
-@small_task
+@large_task
 def generate_report(
     map_dir: LatchDir,
     permit_dir: LatchDir,
