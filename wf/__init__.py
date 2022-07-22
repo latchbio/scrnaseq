@@ -520,313 +520,306 @@ def map_reads(
     samples: List[Sample],
     technology: Technology,
     output_name: str,
-) -> Tuple[LatchDir, LatchFile]:
-    sample_args = []
+) -> Tuple[List[LatchDir], List[str]]:
     nrof_samples = 0
 
-    message(
-        "info",
-        {
-            "title": f"Downloading Sample Data",
-            "body": "",
-        },
-    )
-    print(f"Downloading sample data...")
-    if isinstance(samples[0].replicates[0], SingleEndReads):
-        raise SingleEndReadsUnsupported("Single end reads are not supported")
-    else:
+    mapping_dirs: List[LatchDir] = []
+    sample_names: List[str] = []
+    for sample in samples:
+        nrof_samples += 1
+        sample_names.append(sample.name)
+        message(
+            "info",
+            {
+                "title": f"Downloading Sample Data For {sample.name}",
+                "body": "",
+            },
+        )
+        print(f"Downloading sample data...")
+        if isinstance(sample.replicates[0], SingleEndReads):
+            raise SingleEndReadsUnsupported("Single end reads are not supported")
+
         r1 = []
         r2 = []
-        for sample in samples:
-            nrof_samples += 1
-            for replicate in sample.replicates:
-                r1.append(str(Path(replicate.r1)))
-                r2.append(str(Path(replicate.r2)))
+        sample_args = []
+        for replicate in sample.replicates:
+            r1.append(str(Path(replicate.r1)))
+            r2.append(str(Path(replicate.r2)))
         sample_args.append("-1")
         sample_args += r1
         sample_args.append("-2")
         sample_args += r2
 
-    message(
-        "info",
-        {
-            "title": f"Success",
-            "body": "",
-        },
-    )
-    print("Done")
-
-    message(
-        "info",
-        {
-            "title": f"Mapping {nrof_samples} Sample{'s' if nrof_samples > 1 else ''} To Transcripts",
-            "body": "",
-        },
-    )
-    print(
-        f"Mapping {nrof_samples} sample{'s' if nrof_samples > 1 else ''} to transcripts..."
-    )
-
-    # we allow the library type to be inferred via `-l A` flag.
-    alevin_cmd = [
-        "salmon",
-        "alevin",
-        "-p",
-        "96",
-        "-i",
-        str(Path(splici_index)),
-        "-lA",
-        technology_to_flag.get(technology),
-        "--rad",
-    ]
-    alevin_cmd += sample_args
-
-    alevin_cmd += [
-        "-o",
-        "map",
-    ]
-
-    alevin_cmd = " ".join(alevin_cmd)
-    print("Command: " + alevin_cmd)
-    message("info", {"title": "Command", "body": alevin_cmd})
-
-    alevin_process = subprocess.Popen(
-        alevin_cmd,
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    while True:
-        realtime_output = alevin_process.stdout.readline()
-
-        if realtime_output == "" and alevin_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
-
-    retval = alevin_process.poll()
-    if retval != 0:
         message(
-            "error", {"title": "Salmon Alevin Error", "body": f"View logs to see error"}
-        )
-        raise SalmonAlevinError(f"\tSalmon alevin failed with exit code {retval}")
-
-    message("info", {"title": "Success", "body": ""})
-
-    print("Generating sample to cellular barcode map...")
-    message(
-        "info",
-        {
-            "title": f"Mapping {nrof_samples} Sample{'s' if nrof_samples > 1 else ''} To Cellular Barcodes",
-            "body": "",
-        },
-    )
-
-    try:
-        cb_to_sample_map = {}
-        for sample in samples:
-            for replicate in sample.replicates:
-                with safe_open_fxn(Path(replicate.r1))(Path(replicate.r1), "rt") as f:
-                    for j, line in enumerate(f):
-                        if j % 4 == 1:
-                            barcode = line.strip()[
-                                : technology_to_geometry.get(technology).barcode_length
-                            ]
-                            if barcode not in cb_to_sample_map:
-                                cb_to_sample_map[barcode] = sample.name
-
-    except Exception as e:
-        message(
-            "error",
+            "info",
             {
-                "title": "Sample to Cellular Barcode Mapping Error",
-                "body": f"View logs to see error",
+                "title": f"Success",
+                "body": "",
             },
         )
-        raise SampleToCellularBarcodeMapError(
-            f"\tSample to cellular barcode map failed with error {e}"
+        print("Done")
+
+        message(
+            "info",
+            {
+                "title": f"Mapping {sample.name} To Transcripts",
+                "body": "",
+            },
+        )
+        print(f"Mapping {sample.name} to transcripts...")
+
+        # we allow the library type to be inferred via `-l A` flag.
+        alevin_cmd = [
+            "salmon",
+            "alevin",
+            "-p",
+            "96",
+            "-i",
+            str(Path(splici_index)),
+            "-lA",
+            technology_to_flag.get(technology),
+            "--rad",
+        ]
+        alevin_cmd += sample_args
+
+        alevin_cmd += [
+            "-o",
+            f"{sample.name}_map",
+        ]
+
+        alevin_cmd = " ".join(alevin_cmd)
+        print("Command: " + alevin_cmd)
+        message("info", {"title": "Command", "body": alevin_cmd})
+
+        alevin_process = subprocess.Popen(
+            alevin_cmd,
+            shell=True,
+            errors="replace",
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
 
-    with open("cb_to_sample_map.json", "w") as f:
-        json.dump(cb_to_sample_map, f)
+        while True:
+            realtime_output = alevin_process.stdout.readline()
 
-    print("Sample to cellular barcode map generated.")
-    message("info", {"title": "Success", "body": ""})
+            if realtime_output == "" and alevin_process.poll() is not None:
+                break
+            if realtime_output:
+                print("\t" + realtime_output.strip())
 
-    print("Transcript mapping complete. Packaging Files...")
-    return LatchDir("/root/map", f"{output_name}intermediate_mapping"), LatchFile(
-        "/root/cb_to_sample_map.json",
-        f"{output_name}intermediate_mapping/cb_to_sample_map.json",
-    )
+        retval = alevin_process.poll()
+        if retval != 0:
+            message(
+                "error",
+                {"title": "Salmon Alevin Error", "body": f"View logs to see error"},
+            )
+            raise SalmonAlevinError(f"\tSalmon alevin failed with exit code {retval}")
+
+        mapping_dirs.append(
+            LatchDir(
+                f"/root/{sample.name}_map",
+                f"{output_name}{sample.name}/intermediate_mapping",
+            )
+        )
+        message("info", {"title": "Success", "body": ""})
+
+    message("info", {"title": "Success", "body": f"{nrof_samples} samples mapped"})
+    print(f"Transcript mapping complete for {nrof_samples}. Packaging Files...")
+    return mapping_dirs, sample_names
 
 
 @large_task
 def quantify_reads(
-    map_dir: LatchDir,
+    mapping_dirs: List[LatchDir],
+    sample_names: List[str],
     tg_map: LatchFile,
     output_name: str,
-) -> Tuple[LatchDir, LatchDir]:
-    message("info", {"title": f"Generating Whitelist", "body": ""})
-    print("Generating permit list...")
-    permit_list_cmd = [
-        "alevin-fry",
-        "generate-permit-list",
-        "-d",
-        "fw",
-        "-k",
-        "-i",
-        str(Path(map_dir)),
-        "-o",
-        "quant",
-    ]
-
-    permit_list_cmd = " ".join(permit_list_cmd)
-    print("Command: " + permit_list_cmd)
-    message("info", {"title": "Command", "body": permit_list_cmd})
-
-    permit_list_process = subprocess.Popen(
-        permit_list_cmd,
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    while True:
-        realtime_output = permit_list_process.stdout.readline()
-
-        if realtime_output == "" and permit_list_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
-
-    retval = permit_list_process.poll()
-    if retval != 0:
+) -> Tuple[List[LatchDir], List[LatchDir]]:
+    preprocessing_dirs: List[LatchDir] = []
+    quantification_dirs: List[LatchDir] = []
+    for sample_name, mapping_dir in zip(sample_names, mapping_dirs):
+        message("info", {"title": f"Quantifying {sample_name}", "body": ""})
         message(
-            "error",
-            {
-                "title": "AlevinFry Generate Permit List Error",
-                "body": f"View logs to see error",
-            },
+            "info",
+            {"title": f"Generating Permit List For Sample {sample_name}", "body": ""},
         )
-        raise AlevinFryGeneratePermitListError(
-            f"\tAlevin-fry generate-permit-list failed with exit code {retval}"
+        print(f"Generating permit list...")
+        permit_list_cmd = [
+            "alevin-fry",
+            "generate-permit-list",
+            "-d",
+            "fw",
+            "-k",
+            "-i",
+            str(Path(mapping_dir)),
+            "-o",
+            f"{sample_name}_quant",
+        ]
+
+        permit_list_cmd = " ".join(permit_list_cmd)
+        print("Command: " + permit_list_cmd)
+        message("info", {"title": "Command", "body": permit_list_cmd})
+
+        permit_list_process = subprocess.Popen(
+            permit_list_cmd,
+            shell=True,
+            errors="replace",
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
-    message("info", {"title": "Success", "body": ""})
 
-    message("info", {"title": f"Collating RAD File", "body": ""})
-    print("Collating RAD files...")
-    collate_cmd = [
-        "alevin-fry",
-        "collate",
-        "-t",
-        "96",
-        "-i",
-        "quant",
-        "-r",
-        str(Path(map_dir)),
-    ]
+        while True:
+            realtime_output = permit_list_process.stdout.readline()
 
-    collate_cmd = " ".join(collate_cmd)
-    print("Command: " + collate_cmd)
-    message("info", {"title": "Command", "body": collate_cmd})
+            if realtime_output == "" and permit_list_process.poll() is not None:
+                break
+            if realtime_output:
+                print("\t" + realtime_output.strip())
 
-    collate_process = subprocess.Popen(
-        collate_cmd,
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+        retval = permit_list_process.poll()
+        if retval != 0:
+            message(
+                "error",
+                {
+                    "title": "AlevinFry Generate Permit List Error",
+                    "body": f"View logs to see error",
+                },
+            )
+            raise AlevinFryGeneratePermitListError(
+                f"\tAlevin-fry generate-permit-list failed with exit code {retval} for {sample_name}"
+            )
+        message("info", {"title": "Success", "body": ""})
 
-    while True:
-        realtime_output = collate_process.stdout.readline()
-
-        if realtime_output == "" and collate_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
-
-    retval = collate_process.poll()
-    if retval != 0:
         message(
-            "error",
-            {"title": "AlevinFry Collate Error", "body": f"View logs to see error"},
+            "info",
+            {"title": f"Collating RAD File For Sample {sample_name}", "body": ""},
         )
-        raise AlevinFryCollateError(
-            f"\tAlevin-fry collate failed with exit code {retval}"
+        print("Collating RAD files...")
+        collate_cmd = [
+            "alevin-fry",
+            "collate",
+            "-t",
+            "96",
+            "-i",
+            f"{sample_name}_quant",
+            "-r",
+            str(Path(mapping_dir)),
+        ]
+
+        collate_cmd = " ".join(collate_cmd)
+        print("Command: " + collate_cmd)
+        message("info", {"title": "Command", "body": collate_cmd})
+
+        collate_process = subprocess.Popen(
+            collate_cmd,
+            shell=True,
+            errors="replace",
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
 
-    message("info", {"title": "Success", "body": ""})
+        while True:
+            realtime_output = collate_process.stdout.readline()
 
-    message("info", {"title": f"Quantifying Reads", "body": ""})
-    print("Quantifying reads...")
-    quant_cmd = [
-        "alevin-fry",
-        "quant",
-        "-t",
-        "96",
-        "-i",
-        "quant",
-        "-o",
-        "quant_res",
-        "--tg-map",
-        str(Path(tg_map)),
-        "--resolution",
-        "cr-like",
-        "--use-mtx",
-        "--summary-stat",
-    ]
+            if realtime_output == "" and collate_process.poll() is not None:
+                break
+            if realtime_output:
+                print("\t" + realtime_output.strip())
 
-    quant_cmd = " ".join(quant_cmd)
-    print("Command: " + quant_cmd)
-    message("info", {"title": "Command", "body": quant_cmd})
+        retval = collate_process.poll()
+        if retval != 0:
+            message(
+                "error",
+                {"title": "AlevinFry Collate Error", "body": f"View logs to see error"},
+            )
+            raise AlevinFryCollateError(
+                f"\tAlevin-fry collate failed with exit code {retval} for {sample_name}"
+            )
 
-    quant_process = subprocess.Popen(
-        quant_cmd,
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+        message("info", {"title": "Success", "body": ""})
 
-    while True:
-        realtime_output = quant_process.stdout.readline()
-
-        if realtime_output == "" and quant_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
-
-    retval = quant_process.poll()
-    if retval != 0:
         message(
-            "error", {"title": "AlevinFry Quant", "body": f"View logs to see error"}
+            "info", {"title": f"Quantifying Reads For Sample {sample_name}", "body": ""}
         )
-        raise AlevinFryQuantError(f"\tAlevin-fry quant failed with exit code {retval}")
+        print("Quantifying reads...")
+        quant_cmd = [
+            "alevin-fry",
+            "quant",
+            "-t",
+            "96",
+            "-i",
+            f"{sample_name}_quant",
+            "-o",
+            f"{sample_name}_quant_res",
+            "--tg-map",
+            str(Path(tg_map)),
+            "--resolution",
+            "cr-like",
+            "--use-mtx",
+            "--summary-stat",
+        ]
 
-    message("info", {"title": "Success", "body": ""})
+        quant_cmd = " ".join(quant_cmd)
+        print("Command: " + quant_cmd)
+        message("info", {"title": "Command", "body": quant_cmd})
+
+        quant_process = subprocess.Popen(
+            quant_cmd,
+            shell=True,
+            errors="replace",
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+        while True:
+            realtime_output = quant_process.stdout.readline()
+
+            if realtime_output == "" and quant_process.poll() is not None:
+                break
+            if realtime_output:
+                print("\t" + realtime_output.strip())
+
+        retval = quant_process.poll()
+        if retval != 0:
+            message(
+                "error", {"title": "AlevinFry Quant", "body": f"View logs to see error"}
+            )
+            raise AlevinFryQuantError(
+                f"\tAlevin-fry quant failed with exit code {retval}"
+            )
+
+        preprocessing_dirs.append(
+            LatchDir(
+                f"/root/{sample_name}_quant",
+                f"{output_name}{sample_name}/quant_preprocessing",
+            )
+        )
+        quantification_dirs.append(
+            LatchDir(
+                f"/root/{sample_name}_quant_res",
+                f"{output_name}{sample_name}/raw_counts",
+            )
+        )
+
+        message("info", {"title": "Success", "body": f"{sample_name}"})
+
     print("Quantification complete. Packaging Files...")
-    return LatchDir("/root/quant", f"{output_name}quant_preprocessing"), LatchDir(
-        "/root/quant_res", f"{output_name}raw_counts"
-    )
+    return preprocessing_dirs, quantification_dirs
 
 
 @large_task
 def h5ad(
-    quant_dir: LatchDir, output_name: str, cb_to_sample_map: LatchFile
-) -> Tuple[Optional[LatchFile], Optional[LatchFile], Optional[LatchFile]]:
+    quant_dirs: List[LatchDir], output_name: str, sample_names: List[str]
+) -> Tuple[List[LatchFile], LatchFile]:
     message("info", {"title": f"Mining For Gene Metadata", "body": ""})
     print("Mining for gene metadata...")
 
     h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
-        frydir=str(Path(quant_dir)), output_format="scRNA"
+        frydir=str(Path(quant_dirs[0])), output_format="scRNA"
     )
     gene_names = h5ad_output_standard.var_names
 
@@ -903,151 +896,105 @@ def h5ad(
 
     message("info", {"title": f"Success", "body": ""})
 
-    message("info", {"title": f"Generating H5AD Files", "body": ""})
     print("Generating h5ad files...")
-    failed_count = 0
-
-    cb_sample_map: Dict[str, str] = json.load(open(str(Path(cb_to_sample_map))))
-
-    try:
-        h5ad_output_standard: anndata.AnnData = pyroe.load_fry(
+    sample_h5ad_files: List[LatchFile] = []
+    individual_h5ads = []
+    for sample_name, quant_dir in zip(sample_names, quant_dirs):
+        message(
+            "info", {"title": f"Generating H5AD File For {sample_name}", "body": ""}
+        )
+        h5ad: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
         )
-        sample_annotations = [
-            cb_sample_map.get(x, "ERROR") for x in h5ad_output_standard.obs_names
-        ]
-        h5ad_output_standard.obs["sample"] = sample_annotations
+        h5ad.obs_names = [x + f"_{sample_name}" for x in h5ad.obs_names]
+        sample_annotations = [sample_name for x in h5ad.obs_names]
+        h5ad.obs["sample"] = sample_annotations
         h5ad_output_standard.var["mygene_symbol"] = gene_symbols
         h5ad_output_standard.var["mygene_type"] = gene_types
         h5ad_output_standard.var["mygene_name"] = gene_long_names
-        h5ad_output_standard.write("counts.h5ad")
-        counts_out = LatchFile("/root/counts.h5ad", f"{output_name}counts.h5ad")
-    except Exception as e:
-        message(
-            "warning",
-            {
-                "title": "Failed to generate counts H5AD",
-                "body": f"View logs to see error",
-            },
+        h5ad.write(f"{sample_name}_counts.h5ad")
+        sample_h5ad_files.append(
+            LatchFile(
+                f"/root/{sample_name}_counts.h5ad",
+                f"{output_name}{sample_name}/counts.h5ad",
+            )
         )
-        print(str(e))
-        failed_count += 1
-        counts_out = None
+        individual_h5ads.append(h5ad)
 
-    try:
-        h5ad_output_include_unspliced: anndata.AnnData = pyroe.load_fry(
-            frydir=str(Path(quant_dir)), output_format="velocity"
-        )
-        sample_annotations = [
-            cb_sample_map.get(x, "ERROR")
-            for x in h5ad_output_include_unspliced.obs_names
-        ]
-        h5ad_output_include_unspliced.obs["sample"] = sample_annotations
-        h5ad_output_include_unspliced.var["mygene_symbol"] = gene_symbols
-        h5ad_output_include_unspliced.var["mygene_type"] = gene_types
-        h5ad_output_include_unspliced.var["mygene_name"] = gene_long_names
-        h5ad_output_include_unspliced.write("counts_velocity.h5ad")
-        velocity_out = LatchFile(
-            "/root/counts_velocity.h5ad", f"{output_name}counts_velocity.h5ad"
-        )
-    except Exception as e:
-        message(
-            "warning",
-            {
-                "title": "Failed to generate velocity H5AD",
-                "body": f"View logs to see error",
-            },
-        )
-        print(str(e))
-        failed_count += 1
-        velocity_out = None
-
-    try:
-        h5ad_output_all_layers: anndata.AnnData = pyroe.load_fry(
-            frydir=str(Path(quant_dir)), output_format="raw"
-        )
-        sample_annotations = [
-            cb_sample_map.get(x, "ERROR") for x in h5ad_output_all_layers.obs_names
-        ]
-        h5ad_output_all_layers.obs["sample"] = sample_annotations
-        h5ad_output_all_layers.var["mygene_symbol"] = gene_symbols
-        h5ad_output_all_layers.var["mygene_type"] = gene_types
-        h5ad_output_all_layers.var["mygene_name"] = gene_long_names
-        h5ad_output_all_layers.write("counts_USA.h5ad")
-        USA_out = LatchFile("/root/counts_USA.h5ad", f"{output_name}counts_USA.h5ad")
-    except Exception as e:
-        message(
-            "warning",
-            {
-                "title": "Failed to generate all layers H5AD",
-                "body": f"View logs to see error",
-            },
-        )
-        print(str(e))
-        failed_count += 1
-        USA_out = None
-
-    if failed_count == 3:
-        raise H5ADGenerationError(f"\tFailed to generate all H5AD files")
+    combined_adata = anndata.concat(individual_h5ads)
+    combined_adata.var["mygene_symbol"] = gene_symbols
+    combined_adata.var["mygene_type"] = gene_types
+    combined_adata.var["mygene_name"] = gene_long_names
+    combined_adata.write(f"counts.h5ad")
 
     message("info", {"title": f"Success", "body": ""})
-    return (
-        counts_out,
-        velocity_out,
-        USA_out,
+    return sample_h5ad_files, LatchFile(
+        f"/root/counts.h5ad", f"{output_name}combined_counts.h5ad"
     )
 
 
 @large_task
 def generate_report(
-    map_dir: LatchDir,
-    permit_dir: LatchDir,
-    quant_dir: LatchDir,
-    name: str,
+    map_dirs: List[LatchDir],
+    permit_dirs: List[LatchDir],
+    quant_dirs: List[LatchDir],
+    sample_names: List[str],
     output_name: str,
-) -> LatchFile:
-    message("info", {"title": f"Generating QC Report", "body": ""})
-    print("Generating QC Report...")
-
-    report_cmd = [
-        "Rscript",
-        "qc.R",
-        str(Path(map_dir)),
-        str(Path(permit_dir)),
-        str(Path(quant_dir)),
-        quote(name),
-    ]
-
-    report_process = subprocess.Popen(
-        " ".join(report_cmd),
-        shell=True,
-        errors="replace",
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    while True:
-        realtime_output = report_process.stdout.readline()
-
-        if realtime_output == "" and report_process.poll() is not None:
-            break
-        if realtime_output:
-            print("\t" + realtime_output.strip())
-
-    retval = report_process.poll()
-    if retval != 0:
+) -> List[LatchFile]:
+    reports: List[LatchFile] = []
+    for sample_name, map_dir, permit_dir, quant_dir in zip(
+        sample_names, map_dirs, permit_dirs, quant_dirs
+    ):
         message(
-            "error",
-            {"title": "Alevin-Fry QC Report", "body": f"View logs to see error"},
+            "info", {"title": f"Generating QC Report For {sample_name}", "body": ""}
         )
-        raise ReportGenerationError(
-            f"\tAlevin-Fry QC Report failed with exit code {retval}"
+        print(f"Generating QC Report For {sample_name}...")
+        report_cmd = [
+            "Rscript",
+            "qc.R",
+            str(Path(map_dir)),
+            str(Path(permit_dir)),
+            str(Path(quant_dir)),
+            quote(sample_name),
+        ]
+
+        report_process = subprocess.Popen(
+            " ".join(report_cmd),
+            shell=True,
+            errors="replace",
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+        while True:
+            realtime_output = report_process.stdout.readline()
+
+            if realtime_output == "" and report_process.poll() is not None:
+                break
+            if realtime_output:
+                print("\t" + realtime_output.strip())
+
+        retval = report_process.poll()
+        if retval != 0:
+            message(
+                "error",
+                {"title": "Alevin-Fry QC Report", "body": f"View logs to see error"},
+            )
+            raise ReportGenerationError(
+                f"\tAlevin-Fry QC Report failed with exit code {retval}"
+            )
+
+        reports.append(
+            LatchFile(
+                f"/root/{sample_name}_alevinQC.html",
+                f"{output_name}{sample_name}/alevinQC.html",
+            )
         )
 
     message("info", {"title": "Success", "body": ""})
-    print("QC Report complete. Packaging Files...")
-    return LatchFile("/root/alevinQC.html", f"{output_name}alevinQC.html")
+    print("QC Reports complete. Packaging Files...")
+    return reports
 
 
 @workflow
@@ -1063,12 +1010,11 @@ def scrnaseq(
     splici_index: Optional[LatchDir] = None,
     custom_output_dir: Optional[LatchDir] = None,
 ) -> Tuple[
-    LatchDir,
-    LatchDir,
-    Optional[LatchFile],
-    Optional[LatchFile],
-    Optional[LatchFile],
+    List[LatchDir],
+    List[LatchDir],
     LatchFile,
+    List[LatchFile],
+    List[LatchFile],
 ]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
@@ -1328,34 +1274,41 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    (mapped_reads, cb_to_sample_map) = map_reads(
+    (mapping_dirs, sample_names) = map_reads(
         splici_index=splici_index,
         samples=samples,
         technology=technology,
         output_name=output_name,
     )
 
-    (preprocessed_quant_dir, quantified_reads) = quantify_reads(
-        map_dir=mapped_reads,
+    (preprocessed_quant_dirs, quantified_read_dirs) = quantify_reads(
+        mapping_dirs=mapping_dirs,
+        sample_names=sample_names,
         tg_map=t2g,
         output_name=output_name,
     )
 
-    (simple, velocity, full) = h5ad(
-        quant_dir=quantified_reads,
-        cb_to_sample_map=cb_to_sample_map,
+    (individual_counts, combined_counts) = h5ad(
+        quant_dirs=quantified_read_dirs,
+        sample_names=sample_names,
         output_name=output_name,
     )
 
-    report = generate_report(
-        map_dir=mapped_reads,
-        permit_dir=preprocessed_quant_dir,
-        quant_dir=quantified_reads,
-        name=run_name,
+    reports = generate_report(
+        map_dirs=mapping_dirs,
+        permit_dirs=preprocessed_quant_dirs,
+        quant_dirs=quantified_read_dirs,
+        sample_names=sample_names,
         output_name=output_name,
     )
 
-    return preprocessed_quant_dir, quantified_reads, simple, velocity, full, report
+    return (
+        preprocessed_quant_dirs,
+        quantified_read_dirs,
+        combined_counts,
+        individual_counts,
+        reports,
+    )
 
 
 if __name__ == "wf":
