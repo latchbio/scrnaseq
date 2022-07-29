@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path
 from shlex import quote
 from typing import Callable, Dict, List, Optional, TextIO, Tuple, Union
+import scanpy as sc
 
 import anndata
 import lgenome
@@ -22,6 +23,7 @@ from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
 from marshmallow_jsonschema import JSONSchema
+import deepsort
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -76,6 +78,100 @@ MYGENE_SCOPES = [
     "mirbase",
     "retired",
 ]
+
+
+class Species(Enum):
+    human = "Human"
+    mouse = "Mouse"
+
+
+class HumanTissue(Enum):
+    adipose = "adipose"
+    adrenal_gland = "adrenal gland"
+    artery = "artery"
+    ascending_colon = "ascending colon"
+    bladder = "bladder"
+    blood = "blood"
+    bone_marrow = "bone marrow"
+    brain = "brain"
+    cervix = "cervix"
+    chorionic_villus = "chorionic villus"
+    colorectum = "colorectum"
+    cord_blood = "cord blood"
+    epityphlon = "epityphlon"
+    esophagus = "esophagus"
+    fallopian_tube = "fallopian tube"
+    female_gonad = "female gonad"
+    fetal_adrenal_gland = "fetal adrenal gland"
+    fetal_brain = "fetal brain"
+    fetal_calvaria = "fetal calvaria"
+    fetal_eye = "fetal eye"
+    fetal_heart = "fetal heart"
+    fetal_intestine = "fetal intestine"
+    fetal_kidney = "fetal kidney"
+    fetal_liver = "fetal liver"
+    fetal_lung = "fetal lung"
+    fetal_male_gonad = "fetal male gonad"
+    fetal_muscle = "fetal muscle"
+    fetal_pancreas = "fetal pancreas"
+    fetal_rib = "fetal rib" 
+    fetal_skin = "fetal skin"
+    fetal_spinal_cord = "fetal spinal cord"
+    fetal_stomach = "fetal stomach"
+    fetal_thymus = "fetal thymus"
+    gall_bladder = "gall bladder"
+    heart = "heart"
+    kidney = "kidney"
+    liver = "liver"
+    lung = "lung"
+    muscle = "muscle"
+    neonatal_adrenal_gland = "neonatal adrenal gland" 
+    omentum = "omentum"
+    pancreas = "pancreas"
+    placenta = "placenta"
+    pleura = "pleura"
+    prostat = "prostat"
+    spleen = "spleen"
+    stomach = "stomach"
+    temporal_lobe = "temporal lobe"
+    thyroid = "thyroid"
+    trachea = "trachea"
+    ureter = "ureter"
+
+
+class MouseTissue(Enum):
+    bladder = "bladder"
+    blood = "blood"
+    bone_marrow = "bone marrow"
+    bone_marrow_mesenchyme = "bone marrow mesenchyme"
+    brain = "brain"
+    embryonic_mesenchyme = "embryonic mesenchyme" 
+    fetal_brain = "fetal brain"
+    fetal_intestine = "fetal intestine"
+    fetal_liver = "fetal liver"
+    fetal_lung = "fetal lung"
+    fetal_stomach = "fetal stomach"
+    intestine = "intestine"
+    kidney = "kidney"
+    liver = "liver"
+    lung = "lung"
+    mammary_gland = "mammary gland" 
+    muscle = "muscle"
+    neonatal_calvaria = "neonatal calvaria" 
+    neonatal_heart = "neonatal heart"
+    neonatal_muscle = "neonatal muscle"
+    neonatal_pancreas = "neonatal pancreas"
+    neonatal_rib = "neonatal rib"
+    neonatal_skin = "neonatal skin"
+    ovary = "ovary"
+    pancreas = "pancreas"
+    placenta = "placenta"
+    prostate = "prostate"
+    spleen = "spleen"
+    stomach = "stomach"
+    testis = "testis"
+    thymus = "thymus"
+    uterus = "uterus"
 
 
 @dataclass_json
@@ -811,9 +907,58 @@ def quantify_reads(
     return preprocessing_dirs, quantification_dirs
 
 
+def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], human_tissue: Optional[HumanTissue]) -> Optional[List[Tuple[str, str]]]:
+    """
+    Infer the cell type if mouse tissue or human tissue selection.
+
+    Returns a list of tuples of the form (cell_type, cell_subtype)
+    """
+    # Infer the cell type
+    species = None
+    if mouse_tissue:
+        species = "mouse"
+        tissue = "_".join(mouse_tissue.value.split(" ")).capitalize()
+    elif human_tissue:
+        species = "human"
+        tissue = "_".join(human_tissue.value.split(" ")).capitalize()
+    else:
+        return None
+    
+    message("info", {"title": f"Running Cell Type Analysis", "body": ""})
+    h5ad = h5ad.T
+    sc.pp.normalize_per_cell(h5ad)
+    h5ad.write_csvs("cell_type", skip_data=False)
+
+    cell_names = []
+    with open("cell_type/var.csv") as f:
+        f.readline()
+        for line in f.readlines():
+            cell_names.append(line.split(",")[0])
+
+    with open ("cell_type/inferme.csv", "w") as out:
+        out.write(",".join(cell_names))
+        with open("cell_type/X.csv") as counts:
+            with open("cell_type/obs.csv") as symbols:
+                symbols.readline()
+                for symbol, raw in zip(symbols.readlines(), counts.readlines()):
+                    symbol = symbol.split(",")[1]
+                    if symbol == "NA":
+                        continue
+                    out.write(",".join([symbol, raw]))
+
+    model = deepsort.DeepSortPredictor(species=species, tissue=tissue)
+    model.predict("cell_type/inferme.csv", save_path='cell_type_results')
+
+    with open(f"cell_type_results/{species}_{tissue}_inferme.csv") as f:
+        cell_types = [(line.split(",")[1], line.split(",")[2]) for line in f.readlines()]
+
+    message("info", {"title": f"Done", "body": ""})
+    return cell_types[1:]
+
+
 @large_task
-def h5ad(
-    quant_dirs: List[LatchDir], output_name: str, sample_names: List[str]
+def metadata(
+    quant_dirs: List[LatchDir], output_name: str, sample_names: List[str], mouse_tissue: Optional[MouseTissue], human_tissue: Optional[HumanTissue]
 ) -> Tuple[List[LatchFile], LatchFile]:
     message("info", {"title": f"Mining For Gene Metadata", "body": ""})
     print("Mining for gene metadata...")
@@ -906,6 +1051,11 @@ def h5ad(
         h5ad: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
         )
+        cell_types = infer_cell_type(h5ad, mouse_tissue, human_tissue)
+        if cell_types is not None:
+            h5ad.obs["deepsort_celltype"] = [x[0] for x in cell_types]
+            h5ad.obs["deepsort_subcelltype"] = [x[1] for x in cell_types]
+
         h5ad.obs_names = [x + f"_{sample_name}" for x in h5ad.obs_names]
         sample_annotations = [sample_name for x in h5ad.obs_names]
         h5ad.obs["sample"] = sample_annotations
@@ -928,6 +1078,9 @@ def h5ad(
     combined_adata.write(f"counts.h5ad")
 
     message("info", {"title": f"Success", "body": ""})
+
+    print(" files...")
+
     return sample_h5ad_files, LatchFile(
         f"/root/counts.h5ad", f"{output_name}combined_counts.h5ad"
     )
@@ -1003,12 +1156,16 @@ def scrnaseq(
     read_length: Optional[int],
     run_name: str,
     ta_ref_genome_fork: str,
+    celltype_fork: str,
     latch_genome: LatchGenome,
     technology: Technology = Technology.chromiumv3,
     custom_gtf: Optional[LatchFile] = None,
     custom_ref_genome: Optional[LatchFile] = None,
     splici_index: Optional[LatchDir] = None,
     custom_output_dir: Optional[LatchDir] = None,
+    human_tissue: Optional[HumanTissue] = None,
+    mouse_tissue: Optional[MouseTissue] = None,
+
 ) -> Tuple[
     List[LatchDir],
     List[LatchDir],
@@ -1141,6 +1298,34 @@ def scrnaseq(
                                     - params:
                                         - splici_index
 
+        - section: Automatic Celltype Annotation
+          flow:
+          - text: >-
+                  This workflow uses [scDeepSort](https://www.biorxiv.org/content/10.1101/2020.05.13.094953v1) to automatically add celltype annotations
+                  to cells from select human and mouse tissues. In the future, we plan on supporting additional organisms and tissues. The scDeepSort algorithm
+                  is trained on Tabula Muris Senis (TMS) and Tabula Sapiens (TS) data. The list of supported tissues is available [here](https://github.com/ZJUFanLab/scDeepSort/wiki/Mouse-tissues-and-cell-types).
+          - fork: celltype_fork
+            flows:
+                default:
+                    display_name: None
+                    flow:
+                    - text:
+                        No celltype annotation will be performed.
+                human:
+                    display_name: Human
+                    _tmp_unwrap_optionals:
+                        - human_tissue
+                    flow:
+                    - params:
+                        - human_tissue
+                mouse:
+                    display_name: Mouse
+                    _tmp_unwrap_optionals:
+                        - mouse_tissue
+                    flow:
+                    - params:
+                        - mouse_tissue
+
         - section: Output Settings
           flow:
           - params:
@@ -1182,6 +1367,18 @@ def scrnaseq(
 
             __metadata__:
                 display_name: Reference Genome Source
+
+        celltype_fork:
+
+        human_tissue:
+            __metadata__:
+                display_name: Human Tissue
+        
+        mouse_tissue:
+            __metadata__:
+                display_name: Mouse Tissue
+
+        mouse_tissue:
 
         latch_genome:
           Curated reference files for specific genome sources and builds.
@@ -1288,10 +1485,12 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    (individual_counts, combined_counts) = h5ad(
+    (individual_counts, combined_counts) = metadata(
         quant_dirs=quantified_read_dirs,
         sample_names=sample_names,
         output_name=output_name,
+        human_tissue=human_tissue,
+        mouse_tissue=mouse_tissue,
     )
 
     reports = generate_report(

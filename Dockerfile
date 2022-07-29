@@ -29,6 +29,11 @@ RUN conda install -c defaults \
   salmon alevin-fry multiqc fastqc pyroe bedtools gffread
 
 RUN python3 -m pip install --upgrade latch lgenome mygene requests
+
+COPY deepsort-1.0.tar.gz /root/deepsort-1.0.tar.gz
+RUN python3 -m pip install /root/deepsort-1.0.tar.gz
+
+RUN python3 -m pip install --upgrade latch
 COPY wf /root/wf
 COPY scripts/qc.R /root/qc.R
 ARG tag
