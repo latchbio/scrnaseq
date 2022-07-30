@@ -6,26 +6,26 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import types
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from shlex import quote
 from typing import Callable, Dict, List, Optional, TextIO, Tuple, Union
-from numpy import rec
-import scanpy as sc
-import traceback
 
 import anndata
+import deepsort
 import lgenome
 import mygene
 import pyroe
+import scanpy as sc
 from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
 from marshmallow_jsonschema import JSONSchema
-import deepsort
+from numpy import rec
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -116,7 +116,7 @@ class HumanTissue(Enum):
     fetal_male_gonad = "fetal male gonad"
     fetal_muscle = "fetal muscle"
     fetal_pancreas = "fetal pancreas"
-    fetal_rib = "fetal rib" 
+    fetal_rib = "fetal rib"
     fetal_skin = "fetal skin"
     fetal_spinal_cord = "fetal spinal cord"
     fetal_stomach = "fetal stomach"
@@ -127,7 +127,7 @@ class HumanTissue(Enum):
     liver = "liver"
     lung = "lung"
     muscle = "muscle"
-    neonatal_adrenal_gland = "neonatal adrenal gland" 
+    neonatal_adrenal_gland = "neonatal adrenal gland"
     omentum = "omentum"
     pancreas = "pancreas"
     placenta = "placenta"
@@ -147,7 +147,7 @@ class MouseTissue(Enum):
     bone_marrow = "bone marrow"
     bone_marrow_mesenchyme = "bone marrow mesenchyme"
     brain = "brain"
-    embryonic_mesenchyme = "embryonic mesenchyme" 
+    embryonic_mesenchyme = "embryonic mesenchyme"
     fetal_brain = "fetal brain"
     fetal_intestine = "fetal intestine"
     fetal_liver = "fetal liver"
@@ -157,9 +157,9 @@ class MouseTissue(Enum):
     kidney = "kidney"
     liver = "liver"
     lung = "lung"
-    mammary_gland = "mammary gland" 
+    mammary_gland = "mammary gland"
     muscle = "muscle"
-    neonatal_calvaria = "neonatal calvaria" 
+    neonatal_calvaria = "neonatal calvaria"
     neonatal_heart = "neonatal heart"
     neonatal_muscle = "neonatal muscle"
     neonatal_pancreas = "neonatal pancreas"
@@ -606,9 +606,12 @@ def make_splici_index(
 
     message("info", {"title": "Success", "body": ""})
     print("Splici index generated. Packaging Files...")
-    return LatchDir("/root/splici_index", f"{output_name}splici_index"), LatchFile(
-        f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
-        f"{output_name}splici_index/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
+    return (
+        LatchDir("/root/splici_index", f"{output_name}splici_index"),
+        LatchFile(
+            f"splici_txome/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
+            f"{output_name}splici_index/splici_txome_fl{read_length - flank_trim_length}_t2g_3col.tsv",
+        ),
     )
 
 
@@ -628,10 +631,7 @@ def map_reads(
         sample_names.append(sample.name)
         message(
             "info",
-            {
-                "title": f"Downloading Sample Data For {sample.name}",
-                "body": "",
-            },
+            {"title": f"Downloading Sample Data For {sample.name}", "body": "",},
         )
         print(f"Downloading sample data...")
         if isinstance(sample.replicates[0], SingleEndReads):
@@ -649,20 +649,12 @@ def map_reads(
         sample_args += r2
 
         message(
-            "info",
-            {
-                "title": f"Success",
-                "body": "",
-            },
+            "info", {"title": f"Success", "body": "",},
         )
         print("Done")
 
         message(
-            "info",
-            {
-                "title": f"Mapping {sample.name} To Transcripts",
-                "body": "",
-            },
+            "info", {"title": f"Mapping {sample.name} To Transcripts", "body": "",},
         )
         print(f"Mapping {sample.name} to transcripts...")
 
@@ -909,7 +901,11 @@ def quantify_reads(
     return preprocessing_dirs, quantification_dirs
 
 
-def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], human_tissue: Optional[HumanTissue]) -> Optional[List[Tuple[str, str]]]:
+def infer_cell_type(
+    h5ad: anndata.AnnData,
+    mouse_tissue: Optional[MouseTissue],
+    human_tissue: Optional[HumanTissue],
+) -> Optional[List[Tuple[str, str]]]:
     """
     Infer the cell type if mouse tissue or human tissue selection.
 
@@ -925,12 +921,12 @@ def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], 
         tissue = "_".join(human_tissue.value.split(" ")).capitalize()
     else:
         return None
-    
+
     message("info", {"title": f"Running Cell Type Analysis", "body": ""})
     try:
-        h5ad = h5ad.T
         sc.pp.normalize_per_cell(h5ad)
-        h5ad.write_csvs("cell_type", skip_data=False)
+        h5ad = h5ad.T
+        h5ad.write_csvs("cell_type.csv", skip_data=False)
 
         cell_names = []
         with open("cell_type/var.csv") as f:
@@ -938,22 +934,27 @@ def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], 
             for line in f.readlines():
                 cell_names.append(line.split(",")[0])
 
-        with open ("cell_type/inferme.csv", "w") as out:
-            out.write(",".join(cell_names))
+        with open("cell_type/inferme.csv", "w") as out:
+            out.write("," + ",".join(cell_names) + "\n")
             with open("cell_type/X.csv") as counts:
                 with open("cell_type/obs.csv") as symbols:
                     symbols.readline()
                     for symbol, raw in zip(symbols.readlines(), counts.readlines()):
-                        symbol = symbol.split(",")[1]
+                        symbol = symbol.split(",")[1].strip()
                         if symbol == "NA":
                             continue
-                        out.write(",".join([symbol, raw]))
+                        out.write((",".join([symbol, raw])).strip() + "\n")
 
         model = deepsort.DeepSortPredictor(species=species, tissue=tissue)
-        model.predict("cell_type/inferme.csv", save_path='cell_type_results')
+
+        print("Running DeepSort...")
+        model.predict("cell_type/inferme.csv", save_path="cell_type_results")
 
         with open(f"cell_type_results/{species}_{tissue}_inferme.csv") as f:
-            cell_types = [(line.split(",")[1].strip(), line.split(",")[2].strip()) for line in f.readlines()]
+            cell_types = [
+                (line.split(",")[1].strip(), line.split(",")[2].strip())
+                for line in f.readlines()
+            ]
 
         Path("/root/cell_type").unlink(recursive=True)
         Path("/root/cell_type_results").unlink(recursive=True)
@@ -968,7 +969,11 @@ def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], 
 
 @large_task
 def h5ad(
-    quant_dirs: List[LatchDir], output_name: str, sample_names: List[str], mouse_tissue: Optional[MouseTissue], human_tissue: Optional[HumanTissue]
+    quant_dirs: List[LatchDir],
+    output_name: str,
+    sample_names: List[str],
+    mouse_tissue: Optional[MouseTissue],
+    human_tissue: Optional[HumanTissue],
 ) -> Tuple[List[LatchFile], LatchFile]:
     message("info", {"title": f"Mining For Gene Metadata", "body": ""})
     print("Mining for gene metadata...")
@@ -1069,9 +1074,9 @@ def h5ad(
         h5ad.obs_names = [x + f"_{sample_name}" for x in h5ad.obs_names]
         sample_annotations = [sample_name for x in h5ad.obs_names]
         h5ad.obs["sample"] = sample_annotations
-        h5ad_output_standard.var["mygene_symbol"] = gene_symbols
-        h5ad_output_standard.var["mygene_type"] = gene_types
-        h5ad_output_standard.var["mygene_name"] = gene_long_names
+        h5ad.var["mygene_symbol"] = gene_symbols
+        h5ad.var["mygene_type"] = gene_types
+        h5ad.var["mygene_name"] = gene_long_names
         h5ad.write(f"{sample_name}_counts.h5ad")
         sample_h5ad_files.append(
             LatchFile(
@@ -1089,8 +1094,9 @@ def h5ad(
 
     message("info", {"title": f"Success", "body": ""})
 
-    return sample_h5ad_files, LatchFile(
-        f"/root/counts.h5ad", f"{output_name}combined_counts.h5ad"
+    return (
+        sample_h5ad_files,
+        LatchFile(f"/root/counts.h5ad", f"{output_name}combined_counts.h5ad"),
     )
 
 
@@ -1173,13 +1179,8 @@ def scrnaseq(
     custom_output_dir: Optional[LatchDir] = None,
     human_tissue: Optional[HumanTissue] = None,
     mouse_tissue: Optional[MouseTissue] = None,
-
 ) -> Tuple[
-    List[LatchDir],
-    List[LatchDir],
-    LatchFile,
-    List[LatchFile],
-    List[LatchFile],
+    List[LatchDir], List[LatchDir], LatchFile, List[LatchFile], List[LatchFile],
 ]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
@@ -1465,8 +1466,7 @@ def scrnaseq(
     """
 
     output_name = get_output_location(
-        custom_output_dir=custom_output_dir,
-        run_name=run_name,
+        custom_output_dir=custom_output_dir, run_name=run_name,
     )
 
     (splici_index, t2g) = make_splici_index(
