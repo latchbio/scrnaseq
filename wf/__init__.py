@@ -12,7 +12,9 @@ from enum import Enum
 from pathlib import Path
 from shlex import quote
 from typing import Callable, Dict, List, Optional, TextIO, Tuple, Union
+from numpy import rec
 import scanpy as sc
+import traceback
 
 import anndata
 import lgenome
@@ -925,39 +927,47 @@ def infer_cell_type(h5ad: anndata.AnnData, mouse_tissue: Optional[MouseTissue], 
         return None
     
     message("info", {"title": f"Running Cell Type Analysis", "body": ""})
-    h5ad = h5ad.T
-    sc.pp.normalize_per_cell(h5ad)
-    h5ad.write_csvs("cell_type", skip_data=False)
+    try:
+        h5ad = h5ad.T
+        sc.pp.normalize_per_cell(h5ad)
+        h5ad.write_csvs("cell_type", skip_data=False)
 
-    cell_names = []
-    with open("cell_type/var.csv") as f:
-        f.readline()
-        for line in f.readlines():
-            cell_names.append(line.split(",")[0])
+        cell_names = []
+        with open("cell_type/var.csv") as f:
+            f.readline()
+            for line in f.readlines():
+                cell_names.append(line.split(",")[0])
 
-    with open ("cell_type/inferme.csv", "w") as out:
-        out.write(",".join(cell_names))
-        with open("cell_type/X.csv") as counts:
-            with open("cell_type/obs.csv") as symbols:
-                symbols.readline()
-                for symbol, raw in zip(symbols.readlines(), counts.readlines()):
-                    symbol = symbol.split(",")[1]
-                    if symbol == "NA":
-                        continue
-                    out.write(",".join([symbol, raw]))
+        with open ("cell_type/inferme.csv", "w") as out:
+            out.write(",".join(cell_names))
+            with open("cell_type/X.csv") as counts:
+                with open("cell_type/obs.csv") as symbols:
+                    symbols.readline()
+                    for symbol, raw in zip(symbols.readlines(), counts.readlines()):
+                        symbol = symbol.split(",")[1]
+                        if symbol == "NA":
+                            continue
+                        out.write(",".join([symbol, raw]))
 
-    model = deepsort.DeepSortPredictor(species=species, tissue=tissue)
-    model.predict("cell_type/inferme.csv", save_path='cell_type_results')
+        model = deepsort.DeepSortPredictor(species=species, tissue=tissue)
+        model.predict("cell_type/inferme.csv", save_path='cell_type_results')
 
-    with open(f"cell_type_results/{species}_{tissue}_inferme.csv") as f:
-        cell_types = [(line.split(",")[1], line.split(",")[2]) for line in f.readlines()]
+        with open(f"cell_type_results/{species}_{tissue}_inferme.csv") as f:
+            cell_types = [(line.split(",")[1].strip(), line.split(",")[2].strip()) for line in f.readlines()]
 
-    message("info", {"title": f"Done", "body": ""})
-    return cell_types[1:]
+        Path("/root/cell_type").unlink(recursive=True)
+        Path("/root/cell_type_results").unlink(recursive=True)
+
+        message("info", {"title": f"Done", "body": ""})
+        return cell_types[1:]
+    except Exception as e:
+        message("warning", {"title": f"Cell Type Analysis Error", "body": str(e)})
+        traceback.print_exc()
+        return None
 
 
 @large_task
-def metadata(
+def h5ad(
     quant_dirs: List[LatchDir], output_name: str, sample_names: List[str], mouse_tissue: Optional[MouseTissue], human_tissue: Optional[HumanTissue]
 ) -> Tuple[List[LatchFile], LatchFile]:
     message("info", {"title": f"Mining For Gene Metadata", "body": ""})
@@ -1078,8 +1088,6 @@ def metadata(
     combined_adata.write(f"counts.h5ad")
 
     message("info", {"title": f"Success", "body": ""})
-
-    print(" files...")
 
     return sample_h5ad_files, LatchFile(
         f"/root/counts.h5ad", f"{output_name}combined_counts.h5ad"
@@ -1485,7 +1493,7 @@ def scrnaseq(
         output_name=output_name,
     )
 
-    (individual_counts, combined_counts) = metadata(
+    (individual_counts, combined_counts) = h5ad(
         quant_dirs=quantified_read_dirs,
         sample_names=sample_names,
         output_name=output_name,
