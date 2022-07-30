@@ -1,7 +1,6 @@
 """latch/scrnaseq"""
 
 import gzip
-import json
 import shutil
 import subprocess
 import sys
@@ -24,8 +23,6 @@ from dataclasses_json import dataclass_json
 from flytekit import LaunchPlan
 from latch import large_task, message, small_task, workflow
 from latch.types import LatchDir, LatchFile
-from marshmallow_jsonschema import JSONSchema
-from numpy import rec
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -956,8 +953,8 @@ def infer_cell_type(
                 for line in f.readlines()
             ]
 
-        Path("/root/cell_type").unlink(recursive=True)
-        Path("/root/cell_type_results").unlink(recursive=True)
+        shutil.rmtree("/root/cell_type", ignore_errors=True)
+        shutil.rmtree("/root/cell_type_results", ignore_errors=True)
 
         message("info", {"title": f"Done", "body": ""})
         return cell_types[1:]
@@ -1066,10 +1063,6 @@ def h5ad(
         h5ad: anndata.AnnData = pyroe.load_fry(
             frydir=str(Path(quant_dir)), output_format="scRNA"
         )
-        cell_types = infer_cell_type(h5ad, mouse_tissue, human_tissue)
-        if cell_types is not None:
-            h5ad.obs["deepsort_celltype"] = [x[0] for x in cell_types]
-            h5ad.obs["deepsort_subcelltype"] = [x[1] for x in cell_types]
 
         h5ad.obs_names = [x + f"_{sample_name}" for x in h5ad.obs_names]
         sample_annotations = [sample_name for x in h5ad.obs_names]
@@ -1077,6 +1070,12 @@ def h5ad(
         h5ad.var["mygene_symbol"] = gene_symbols
         h5ad.var["mygene_type"] = gene_types
         h5ad.var["mygene_name"] = gene_long_names
+
+        cell_types = infer_cell_type(h5ad, mouse_tissue, human_tissue)
+        if cell_types is not None:
+            h5ad.obs["deepsort_celltype"] = [x[0] for x in cell_types]
+            h5ad.obs["deepsort_subcelltype"] = [x[1] for x in cell_types]
+
         h5ad.write(f"{sample_name}_counts.h5ad")
         sample_h5ad_files.append(
             LatchFile(
