@@ -1071,6 +1071,10 @@ def h5ad(
         h5ad.var["mygene_type"] = gene_types
         h5ad.var["mygene_name"] = gene_long_names
 
+        h5ad.var["mygene_symbol"] = h5ad.var["mygene_symbol"].astype(str)
+        h5ad.var["mygene_type"] = h5ad.var["mygene_type"].astype(str)
+        h5ad.var["mygene_name"] = h5ad.var["mygene_name"].astype(str)
+
         cell_types = infer_cell_type(h5ad, mouse_tissue, human_tissue)
         if cell_types is not None:
             h5ad.obs["deepsort_celltype"] = [x[0] for x in cell_types]
@@ -1089,6 +1093,11 @@ def h5ad(
     combined_adata.var["mygene_symbol"] = gene_symbols
     combined_adata.var["mygene_type"] = gene_types
     combined_adata.var["mygene_name"] = gene_long_names
+    combined_adata.var["mygene_symbol"] = combined_adata.var["mygene_symbol"].astype(
+        str
+    )
+    combined_adata.var["mygene_type"] = combined_adata.var["mygene_type"].astype(str)
+    combined_adata.var["mygene_name"] = combined_adata.var["mygene_name"].astype(str)
     combined_adata.write(f"counts.h5ad")
 
     message("info", {"title": f"Success", "body": ""})
