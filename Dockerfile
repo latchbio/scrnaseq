@@ -43,6 +43,11 @@ RUN ln /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30 /usr/lib/x86_64-linux-gnu/l
 RUN python3 -m pip install /root/scDeepSort-v1.0-cpu.tar.gz
 ENV DGLBACKEND pytorch
 
+RUN apt-get install libmagick++-dev -y
+RUN Rscript -e "BiocManager::install('celda')"
+RUN Rscript -e "package('celda)'"
+
+
 COPY wf /root/wf
 COPY scripts/qc.R /root/qc.R
 COPY scripts/decontx.R /root/decontx.R

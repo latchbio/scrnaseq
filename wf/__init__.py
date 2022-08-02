@@ -846,6 +846,8 @@ def quantify_reads(
         quant_cmd = [
             "alevin-fry",
             "quant",
+            "--num-bootstraps",
+            "0",
             "-t",
             "96",
             "-i",
@@ -1014,7 +1016,7 @@ def run_decontX(
             "warning",
             {"title": "DecontX Ambient RNA Removal", "body": f"View logs to see error"},
         )
-        print(f"\tAlevin-Fry QC Report failed with exit code {retval}")
+        print(f"\tDecontX failed with exit code {retval}")
 
 
 @large_task
