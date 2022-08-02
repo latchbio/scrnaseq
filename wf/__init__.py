@@ -746,7 +746,6 @@ def quantify_reads(
         permit_list_cmd = [
             "alevin-fry",
             "generate-permit-list",
-            "--knee-distance",
             "-d",
             "either",
             "-k",

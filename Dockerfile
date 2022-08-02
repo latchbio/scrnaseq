@@ -27,7 +27,8 @@ RUN conda install -c defaults \
   -c conda-forge \
   -c bioconda \
   -y -n base --debug \
-  salmon alevin-fry multiqc fastqc pyroe bedtools gffread
+  salmon alevin-fry==0.7.0 multiqc fastqc pyroe bedtools gffread
+
 
 RUN python3 -m pip install --upgrade latch lgenome mygene requests openpyxl
 
