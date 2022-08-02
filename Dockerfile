@@ -13,7 +13,8 @@ RUN apt install r-recommended r-base-core r-base libcurl4-openssl-dev libssl-dev
 
 RUN Rscript -e "install.packages('BiocManager')"
 RUN Rscript -e "BiocManager::install('alevinQC')"
-RUN Rscript -e "library(alevinQC)"
+RUN Rscript -e "BiocManager::install('celda')"
+RUN Rscript -e "BiocManager::install('zellkonverter')"
 
 RUN curl -O \
   https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
@@ -43,6 +44,7 @@ ENV DGLBACKEND pytorch
 
 COPY wf /root/wf
 COPY scripts/qc.R /root/qc.R
+COPY scripts/decontx.R /root/decontx.R
 ARG tag
 ENV FLYTE_INTERNAL_IMAGE $tag
 WORKDIR /root

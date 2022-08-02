@@ -628,7 +628,10 @@ def map_reads(
         sample_names.append(sample.name)
         message(
             "info",
-            {"title": f"Downloading Sample Data For {sample.name}", "body": "",},
+            {
+                "title": f"Downloading Sample Data For {sample.name}",
+                "body": "",
+            },
         )
         print(f"Downloading sample data...")
         if isinstance(sample.replicates[0], SingleEndReads):
@@ -646,12 +649,20 @@ def map_reads(
         sample_args += r2
 
         message(
-            "info", {"title": f"Success", "body": "",},
+            "info",
+            {
+                "title": f"Success",
+                "body": "",
+            },
         )
         print("Done")
 
         message(
-            "info", {"title": f"Mapping {sample.name} To Transcripts", "body": "",},
+            "info",
+            {
+                "title": f"Mapping {sample.name} To Transcripts",
+                "body": "",
+            },
         )
         print(f"Mapping {sample.name} to transcripts...")
 
@@ -735,8 +746,9 @@ def quantify_reads(
         permit_list_cmd = [
             "alevin-fry",
             "generate-permit-list",
+            "--knee-distance",
             "-d",
-            "fw",
+            "either",
             "-k",
             "-i",
             str(Path(mapping_dir)),
@@ -964,6 +976,48 @@ def infer_cell_type(
         return None
 
 
+def run_decontX(
+    h5ad_path: Path,
+    sample_name: str,
+) -> None:
+    """
+    Remove ambient RNA signal from count matrix using decontX.
+    Executes in place on an input file.
+    """
+    message("info", {"title": f"Running decontX on {sample_name}", "body": ""})
+    print(f"Running decontX on {sample_name}...")
+    decontx_cmd = [
+        "Rscript",
+        "decontx.R",
+        str(h5ad_path),
+    ]
+
+    decontx_process = subprocess.Popen(
+        " ".join(decontx_cmd),
+        shell=True,
+        errors="replace",
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    while True:
+        realtime_output = decontx_process.stdout.readline()
+
+        if realtime_output == "" and decontx_process.poll() is not None:
+            break
+        if realtime_output:
+            print("\t" + realtime_output.strip())
+
+    retval = decontx_process.poll()
+    if retval != 0:
+        message(
+            "warning",
+            {"title": "DecontX Ambient RNA Removal", "body": f"View logs to see error"},
+        )
+        print(f"\tAlevin-Fry QC Report failed with exit code {retval}")
+
+
 @large_task
 def h5ad(
     quant_dirs: List[LatchDir],
@@ -971,6 +1025,7 @@ def h5ad(
     sample_names: List[str],
     mouse_tissue: Optional[MouseTissue],
     human_tissue: Optional[HumanTissue],
+    remove_ambient_rna: bool = False,
 ) -> Tuple[List[LatchFile], LatchFile]:
     message("info", {"title": f"Mining For Gene Metadata", "body": ""})
     print("Mining for gene metadata...")
@@ -1081,6 +1136,10 @@ def h5ad(
             h5ad.obs["deepsort_subcelltype"] = [x[1] for x in cell_types]
 
         h5ad.write(f"{sample_name}_counts.h5ad")
+
+        if remove_ambient_rna:
+            run_decontX(Path(f"/root/{sample_name}_counts.h5ad"), sample_name)
+
         sample_h5ad_files.append(
             LatchFile(
                 f"/root/{sample_name}_counts.h5ad",
@@ -1099,6 +1158,8 @@ def h5ad(
     combined_adata.var["mygene_type"] = combined_adata.var["mygene_type"].astype(str)
     combined_adata.var["mygene_name"] = combined_adata.var["mygene_name"].astype(str)
     combined_adata.write(f"counts.h5ad")
+    if remove_ambient_rna:
+        run_decontX(Path("/root/counts.h5ad"), sample_name)
 
     message("info", {"title": f"Success", "body": ""})
 
@@ -1187,8 +1248,13 @@ def scrnaseq(
     custom_output_dir: Optional[LatchDir] = None,
     human_tissue: Optional[HumanTissue] = None,
     mouse_tissue: Optional[MouseTissue] = None,
+    remove_ambient_rna: bool = False,
 ) -> Tuple[
-    List[LatchDir], List[LatchDir], LatchFile, List[LatchFile], List[LatchFile],
+    List[LatchDir],
+    List[LatchDir],
+    LatchFile,
+    List[LatchFile],
+    List[LatchFile],
 ]:
     """Performs alignment & quantification on Single Cell RNA-Sequencing reads.
 
@@ -1321,6 +1387,7 @@ def scrnaseq(
                   This workflow uses [scDeepSort](https://www.biorxiv.org/content/10.1101/2020.05.13.094953v1) to automatically add celltype annotations
                   to cells from select human and mouse tissues. In the future, we plan on supporting additional organisms and tissues. The scDeepSort algorithm
                   is trained on Tabula Muris Senis (TMS) and Tabula Sapiens (TS) data. The list of supported tissues is available [here](https://github.com/ZJUFanLab/scDeepSort/wiki/Mouse-tissues-and-cell-types).
+                  Enabling this option will add two pieces of metadata to each cell: `deepsort_celltype` and `deepsort_subcelltype`.
           - fork: celltype_fork
             flows:
                 default:
@@ -1342,6 +1409,19 @@ def scrnaseq(
                     flow:
                     - params:
                         - mouse_tissue
+
+        - section: Ambient RNA Removal
+          flow:
+            - text: >-
+                  This workflow uses [decontX](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1950-6)
+                  to remove the influence of contaminating ambient RNA from the
+                  counts matrix. In short, the algorithm explicitly defines the contamination distribution to be a weighted
+                  combination of all other cell population distributions, allowing it to
+                  tease out what ambient RNAs are floating around in the sample and correct all cells
+                  counts for them. Enabling this parameter will modify the counts and add two
+                  pieces of metadata to each cell: `decontX_contamination` and `decontX_clusters`.
+            - params:
+                - remove_ambient_rna
 
         - section: Output Settings
           flow:
@@ -1390,7 +1470,7 @@ def scrnaseq(
         human_tissue:
             __metadata__:
                 display_name: Human Tissue
-        
+
         mouse_tissue:
             __metadata__:
                 display_name: Mouse Tissue
@@ -1455,6 +1535,13 @@ def scrnaseq(
           __metadata__:
             display_name: Save Generated Reference Indexes
 
+        remove_ambient_rna:
+            Enabling this parameter will modify the counts and add two
+            pieces of metadata to each cell: `decontX_contamination` and `decontX_clusters`.
+
+          __metadata__:
+            display_name: Run DecontX
+
         run_name:
           A name for this analysis run, this will be used to name outputs from
           this run.
@@ -1474,7 +1561,8 @@ def scrnaseq(
     """
 
     output_name = get_output_location(
-        custom_output_dir=custom_output_dir, run_name=run_name,
+        custom_output_dir=custom_output_dir,
+        run_name=run_name,
     )
 
     (splici_index, t2g) = make_splici_index(
@@ -1507,6 +1595,7 @@ def scrnaseq(
         output_name=output_name,
         human_tissue=human_tissue,
         mouse_tissue=mouse_tissue,
+        remove_ambient_rna=remove_ambient_rna,
     )
 
     reports = generate_report(
