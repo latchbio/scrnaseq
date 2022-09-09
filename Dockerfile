@@ -45,7 +45,7 @@ ENV DGLBACKEND pytorch
 
 RUN apt-get install libmagick++-dev -y
 RUN Rscript -e "BiocManager::install('celda')"
-RUN Rscript -e "package('celda)'"
+RUN Rscript -e "library('celda')"
 
 
 COPY wf /root/wf

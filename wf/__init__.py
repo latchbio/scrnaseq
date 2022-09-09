@@ -1239,9 +1239,10 @@ def scrnaseq(
     samples: List[Sample],
     read_length: Optional[int],
     run_name: str,
-    ta_ref_genome_fork: str,
-    celltype_fork: str,
     latch_genome: LatchGenome,
+    ta_ref_genome_fork: str = "database",
+    celltype_fork: str = "default",
+    output_location_fork: str = "default",
     technology: Technology = Technology.chromiumv3,
     custom_gtf: Optional[LatchFile] = None,
     custom_ref_genome: Optional[LatchFile] = None,
@@ -1552,6 +1553,8 @@ def scrnaseq(
             display_name: Run Name
 
         output_location_fork:
+            __metadata__:
+                display_name: Output Location
 
         custom_output_dir:
           You can provide a custom location where this run's analysis outputs

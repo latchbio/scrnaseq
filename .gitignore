@@ -3,3 +3,4 @@
 *.pyo
 .env/
 scDeepSort-v1.0-cpu.tar.gz
+.latch_report.tar.gz
