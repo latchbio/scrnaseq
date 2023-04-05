@@ -1328,6 +1328,7 @@ def scrnaseq(
         repository: github.com/latchbio/scrnaseq
         license:
             id: MIT
+        no_standard_bulk_execution: true
         flow:
         - section: Samples
           flow:

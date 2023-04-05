@@ -3,13 +3,14 @@ FROM 812206152185.dkr.ecr.us-west-2.amazonaws.com/latch-base:c57f-main
 ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
 
-RUN apt install -y software-properties-common
+RUN apt-get update
+RUN apt-get install -y software-properties-common
 RUN apt remove r-base
 RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-key '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7'
 RUN add-apt-repository 'deb https://cloud.r-project.org/bin/linux/debian bullseye-cran40/'
 
-RUN apt update
-RUN apt install r-recommended r-base-core r-base libcurl4-openssl-dev libssl-dev wget curl pandoc pandoc-citeproc --yes
+RUN apt-get update
+RUN apt-get install r-recommended r-base-core r-base libcurl4-openssl-dev libssl-dev wget curl pandoc pandoc-citeproc --yes
 
 RUN Rscript -e "install.packages('BiocManager')"
 RUN Rscript -e "BiocManager::install('alevinQC')"
