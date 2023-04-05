@@ -326,14 +326,18 @@ class SampleToCellularBarcodeMapError(Exception):
 @small_task
 def get_output_location(custom_output_dir: Optional[LatchDir], run_name: str) -> str:
     print("Generating output location...")
-    run_name = run_name.rstrip("/").lstrip("/")
+    stripped_run_name = run_name.rstrip("/").lstrip("/")
+
+    if stripped_run_name == "":
+        raise RuntimeError(f"Run name must be provided and contain alphanumerical characters: found `{run_name}`")
+
     if custom_output_dir is None:
-        output_base = f"latch:///SCRNA-Seq Outputs/{run_name}/"
+        output_base = f"latch:///SCRNA-Seq Outputs/{stripped_run_name}/"
     else:
         remote_path: str = custom_output_dir.remote_path
         if remote_path[-1] != "/":
             remote_path += "/"
-        output_base = f"{remote_path}{run_name}/"
+        output_base = f"{remote_path}{stripped_run_name}/"
 
     print("\tOutput location: " + output_base)
     message("info", {"title": "Output Directory", "body": output_base})
